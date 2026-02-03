@@ -1,29 +1,45 @@
-# macOS
+# OS
 .DS_Store
 .AppleDouble
 .LSOverride
+Thumbs.db
 
-# Python
+# Python bytecode / caches
 __pycache__/
 *.py[cod]
 *$py.class
+.pytest_cache/
+.mypy_cache/
+.pyright/
+.ruff_cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+.hypothesis/
+.pytype/
 
-# Virtual environments
+# Build / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+*.egg
+pip-wheel-metadata/
+__pypackages__/
+
+# Virtual environments / env files
 .venv/
 venv/
 env/
-.env/
+ENV/
+.env
+.env.*
+!.env.example
 
-# Test / coverage
-.pytest_cache/
-.coverage
-htmlcov/
-.tox/
-
-# Linters / formatters
-.ruff_cache/
-.mypy_cache/
-.pyright/
+# Logs
+*.log
 
 # Editors / IDEs
 .idea/
