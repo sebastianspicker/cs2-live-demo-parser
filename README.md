@@ -1,4 +1,4 @@
-# CS2 Esports Broadcaster
+# CS2 Live Demo Parser
 
 CS2 demo parser and WebSocket broadcaster for near real-time spectator overlays and match analysis.
 
