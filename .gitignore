@@ -1,0 +1,48 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+.env/
+
+# Test / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Linters / formatters
+.ruff_cache/
+.mypy_cache/
+.pyright/
+
+# Editors / IDEs
+.idea/
+
+# VS Code (keep shared configs if present)
+.vscode/*
+!.vscode/settings.json
+!.vscode/launch.json
+!.vscode/tasks.json
+!.vscode/extensions.json
+!.vscode/.checkmarxIgnored
+
+# CS2 demo files (usually large / local-only)
+demos/**/*.dem
+
+# Map assets/metadata (excluded for licensing)
+maps/
+
+# Local-only features (intentionally excluded to prevent misuse)
+private/
+server/private_features/
+client/private_features/
