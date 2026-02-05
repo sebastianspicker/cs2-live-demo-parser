@@ -43,14 +43,13 @@ ENV/
 
 # Editors / IDEs
 .idea/
+.vscode/
 
-# VS Code (keep shared configs if present)
-.vscode/*
-!.vscode/settings.json
-!.vscode/launch.json
-!.vscode/tasks.json
-!.vscode/extensions.json
-!.vscode/.checkmarxIgnored
+# docs (local findings/logs/decisions)
+DECISIONS.md
+FINDINGS.md
+LOG.md
+REFACTOR_PLAN.md
 
 # CS2 demo files (usually large / local-only)
 demos/**/*.dem
