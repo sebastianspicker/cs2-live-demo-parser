@@ -41,6 +41,12 @@ ENV/
 # Logs
 *.log
 
+# Local caches and test artifacts
+.cache/
+coverage.xml
+junit.xml
+test-results/
+
 # Editors / IDEs
 .idea/
 .vscode/
