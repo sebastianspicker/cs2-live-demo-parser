@@ -12,6 +12,24 @@ from metrics import start_metrics_server
 from ws_server import ProfessionalBroadcastServer
 
 
+def _safe_float(value, default: float) -> float:
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_int(value, default: int) -> int:
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def parse_args():
     repo_root = Path(__file__).resolve().parents[1]
     app_config = load_app_config()
@@ -24,21 +42,27 @@ def parse_args():
         default_bind_host,
     )
 
+    poll_default = _safe_float(server_config.get("poll_interval"), 0.8)
+    metrics_port_default = _safe_int(server_config.get("metrics_port"), 0)
+    parser_exec_default = server_config.get("parser_executor", "none")
+    if parser_exec_default not in ("none", "thread", "process"):
+        parser_exec_default = "none"
+
     parser = argparse.ArgumentParser(description="CS2 Esports Broadcaster")
     parser.add_argument(
         "--demo-dir", default=str(server_config.get("demo_dir", repo_root / "demos"))
     )
     parser.add_argument(
-        "--poll-interval", type=float, default=float(server_config.get("poll_interval", 0.8))
+        "--poll-interval", type=float, default=poll_default
     )
     parser.add_argument("--no-msgpack", action="store_true")
     parser.add_argument(
         "--parser-executor",
         choices=["none", "thread", "process"],
-        default=server_config.get("parser_executor", "none"),
+        default=parser_exec_default,
     )
     parser.add_argument(
-        "--metrics-port", type=int, default=int(server_config.get("metrics_port", 0))
+        "--metrics-port", type=int, default=metrics_port_default
     )
     parser.add_argument("--bind-host", default=default_bind_host)
     parser.add_argument("--metrics-host", default=default_metrics_host)

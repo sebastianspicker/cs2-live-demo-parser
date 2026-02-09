@@ -41,6 +41,7 @@ class ProfessionalBroadcastServer:
         self.selected_demo = None
         self.demo_list = []
         self.demo_list_version = 0
+        self.demo_list_lock = threading.Lock()
         self.status_lock = threading.Lock()
         self.status_version = 0
         self.status_payload = {"type": "status", "message": "", "level": "info", "expires_in": 0}
@@ -204,7 +205,8 @@ class ProfessionalBroadcastServer:
                         await asyncio.wait_for(pong, timeout=10)
                     except Exception:
                         break
-                except Exception:
+                except Exception as exc:
+                    print(f"❌ Client loop error (ID: {client_id}): {exc}")
                     break
 
         except Exception as exc:
@@ -415,17 +417,20 @@ class ProfessionalBroadcastServer:
         print(f"📄 Loading demo: {demo_path.name}")
         self._set_demo_loading(True)
         self.parser = AdvancedDemoParser(demo_path)
-        self._set_demo_valid(True)
-        self._set_demo_loading(False)
         if self.worker_in:
             try:
                 self.worker_in.put({"cmd": "set_demo", "path": str(demo_path)})
                 self.worker_out.get(timeout=2)
+                self._set_demo_valid(True)
+                self._set_demo_loading(False)
             except Exception as exc:
                 print(f"❌ Worker init failed: {exc}")
                 self._stop_worker()
                 self._set_demo_valid(False)
                 self._set_demo_loading(False)
+        else:
+            self._set_demo_valid(True)
+            self._set_demo_loading(False)
 
     def _resolve_demo_path(self, name: str) -> Optional[Path]:
         if not name:
@@ -564,12 +569,14 @@ class ProfessionalBroadcastServer:
                 entries.append((stat.st_mtime, stat.st_size, path.name))
             for mtime, size, name in sorted(entries, key=lambda item: item[0], reverse=True):
                 demos.append({"name": name, "size": size, "mtime": mtime})
-        if demos != self.demo_list:
-            self.demo_list = demos
-            self.demo_list_version += 1
+        with self.demo_list_lock:
+            if demos != self.demo_list:
+                self.demo_list = demos
+                self.demo_list_version += 1
 
     def _get_demo_list_snapshot(self):
-        return list(self.demo_list), self.demo_list_version
+        with self.demo_list_lock:
+            return list(self.demo_list), self.demo_list_version
 
     def _set_status(self, message: str, level: str = "info", sticky: bool = False) -> None:
         payload = {
@@ -741,7 +748,7 @@ class ProfessionalBroadcastServer:
             "compression_pct": round(compression_pct, 2),
             "avg_parse_ms": round(avg_parse, 2),
             "last_parse_ms": round(last_parse, 2),
-            "last_tick": self.last_update.get("data", {}).get("tick") if self.last_update else None,
+            "last_tick": (self.last_update.get("data") or {}).get("tick") if self.last_update else None,
             "map": self.last_update.get("map") if self.last_update else None,
             "parser_executor": self.parser_executor,
         }

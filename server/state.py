@@ -92,6 +92,10 @@ def build_players(
         else:
             is_alive = life_state == 0
         armor = row.get("armor_value") or 0
+        try:
+            armor_int = int(armor)
+        except Exception:
+            armor_int = 0
         helmet = bool(row.get("has_helmet") or False)
         money = row.get("balance")
         try:
@@ -129,7 +133,7 @@ def build_players(
                 "team": team,
                 "is_alive": bool(is_alive),
                 "health": health_int,
-                "armor": int(armor),
+                "armor": armor_int,
                 "has_helmet": helmet,
                 "money": money_value,
                 "weapon": "Unknown",

@@ -443,10 +443,13 @@ class CS2BroadcasterClient {
         const tBankEl = get("tBank");
         const ctStatusEl = get("ctStatus");
         const tStatusEl = get("tStatus");
-        if (ctBankEl) ctBankEl.textContent = `$${data.money.ct}`;
-        if (tBankEl) tBankEl.textContent = `$${data.money.t}`;
-        if (ctStatusEl) ctStatusEl.textContent = data.money.ct_status;
-        if (tStatusEl) tStatusEl.textContent = data.money.t_status;
+        const money = data.money && typeof data.money === "object"
+            ? data.money
+            : { ct: 0, t: 0, ct_status: "Eco", t_status: "Eco" };
+        if (ctBankEl) ctBankEl.textContent = `$${money.ct}`;
+        if (tBankEl) tBankEl.textContent = `$${money.t}`;
+        if (ctStatusEl) ctStatusEl.textContent = money.ct_status;
+        if (tStatusEl) tStatusEl.textContent = money.t_status;
 
         const playerCountEl = get("playerCount");
         if (playerCountEl) {

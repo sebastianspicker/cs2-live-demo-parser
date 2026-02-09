@@ -50,6 +50,7 @@ test-results/
 # Editors / IDEs
 .idea/
 .vscode/
+.cursor/
 
 # docs (local findings/logs/decisions)
 DECISIONS.md
