@@ -748,7 +748,9 @@ class ProfessionalBroadcastServer:
             "compression_pct": round(compression_pct, 2),
             "avg_parse_ms": round(avg_parse, 2),
             "last_parse_ms": round(last_parse, 2),
-            "last_tick": (self.last_update.get("data") or {}).get("tick") if self.last_update else None,
+            "last_tick": (self.last_update.get("data") or {}).get("tick")
+            if self.last_update
+            else None,
             "map": self.last_update.get("map") if self.last_update else None,
             "parser_executor": self.parser_executor,
         }

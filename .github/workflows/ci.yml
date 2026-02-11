@@ -16,6 +16,7 @@ jobs:
   test:
     name: Python lint + tests (3.13)
     runs-on: ubuntu-latest
+    if: github.actor != 'dependabot[bot]'
     timeout-minutes: 10
     strategy:
       fail-fast: false

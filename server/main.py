@@ -52,18 +52,14 @@ def parse_args():
     parser.add_argument(
         "--demo-dir", default=str(server_config.get("demo_dir", repo_root / "demos"))
     )
-    parser.add_argument(
-        "--poll-interval", type=float, default=poll_default
-    )
+    parser.add_argument("--poll-interval", type=float, default=poll_default)
     parser.add_argument("--no-msgpack", action="store_true")
     parser.add_argument(
         "--parser-executor",
         choices=["none", "thread", "process"],
         default=parser_exec_default,
     )
-    parser.add_argument(
-        "--metrics-port", type=int, default=metrics_port_default
-    )
+    parser.add_argument("--metrics-port", type=int, default=metrics_port_default)
     parser.add_argument("--bind-host", default=default_bind_host)
     parser.add_argument("--metrics-host", default=default_metrics_host)
     return parser.parse_args()
