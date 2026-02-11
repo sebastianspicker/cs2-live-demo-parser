@@ -23,13 +23,27 @@
                 <div class="header-stat">
                     👥 Players: <strong id="playerCount">0/10</strong>
                 </div>
+                <div class="header-stat">
+                    <label>Layout:</label>
+                    <select class="layout-selector" id="layoutSelector">
+                        <option value="default">Default</option>
+                        <option value="radar_center">Radar center</option>
+                    </select>
+                </div>
+                <div class="header-stat mini-radar-btn-wrap">
+                    <button type="button" class="settings-btn" id="openMiniRadarBtn" title="Open radar in a separate window (e.g. for second monitor)">📌 Mini radar</button>
+                </div>
             </div>
         </div>
 
         <!-- Main Content -->
-        <div class="grid-main">
-            <!-- Radar -->
-            <div class="radar-container">
+        <div class="grid-main" id="gridMain">
+            <div class="main-content-wrap">
+                <div class="team-list team-list-t" id="teamListT">
+                    <h4 class="team-list-title">T</h4>
+                    <div class="team-list-players" id="teamListTPlayers"></div>
+                </div>
+                <div class="radar-container">
                 <div class="radar-header">
                     <span>📊 Live Map View</span>
                     <select class="map-selector" id="mapSelector">
@@ -57,6 +71,45 @@
                         <label><input type="checkbox" id="toggleTrails" checked>Trails</label>
                         <label><input type="checkbox" id="toggleSmooth" checked>Smooth</label>
                     </div>
+                    <div class="radar-settings-wrap">
+                        <button type="button" class="settings-btn" id="radarSettingsBtn" title="Radar settings">⚙️ Settings</button>
+                        <div class="radar-settings-panel" id="radarSettingsPanel" hidden>
+                            <h4 class="radar-settings-title">Radar Settings</h4>
+                            <div class="radar-settings-row">
+                                <label>Dot size</label>
+                                <input type="range" id="settingDotSize" min="0.5" max="2" step="0.1" value="1">
+                                <span class="radar-settings-value" id="settingDotSizeValue">1</span>
+                            </div>
+                            <div class="radar-settings-row">
+                                <label>Bomb size</label>
+                                <input type="range" id="settingBombSize" min="0.1" max="2" step="0.1" value="0.5">
+                                <span class="radar-settings-value" id="settingBombSizeValue">0.5</span>
+                            </div>
+                            <label class="radar-settings-check"><input type="checkbox" id="settingShowAllyNames"> Ally names</label>
+                            <label class="radar-settings-check"><input type="checkbox" id="settingShowEnemyNames" checked> Enemy names</label>
+                            <label class="radar-settings-check"><input type="checkbox" id="settingShowViewCones"> View cones</label>
+                            <div class="radar-settings-row">
+                                <label>Map rotation</label>
+                                <select id="settingViewRotation">
+                                    <option value="0">0°</option>
+                                    <option value="90">90°</option>
+                                    <option value="180">180°</option>
+                                    <option value="270">270°</option>
+                                </select>
+                            </div>
+                            <div class="radar-settings-row">
+                                <label>Teams on map</label>
+                                <select id="settingMapTeamFilter">
+                                    <option value="all">All</option>
+                                    <option value="t">T only</option>
+                                    <option value="ct">CT only</option>
+                                </select>
+                            </div>
+                            <label class="radar-settings-check"><input type="checkbox" id="settingShowBombOnMap" checked> Show bomb on map</label>
+                            <label class="radar-settings-check"><input type="checkbox" id="settingShowKitsOnMap" checked> Show kits on map</label>
+                            <label class="radar-settings-check"><input type="checkbox" id="settingShowWeaponsOnMap" checked> Show weapons on map</label>
+                        </div>
+                    </div>
                     <select class="map-selector" id="samplingSelector" title="Lower value = more accurate metrics but more CPU. Higher value = less overhead and slightly lower latency impact in live parsing.">
                         <option value="1">Sampling 1</option>
                         <option value="2">Sampling 2</option>
@@ -72,6 +125,11 @@
                     <div class="sampling-text" id="samplingHintText">
                         Sampling controls how often MsgPack size metrics are recomputed. Lower values are more accurate but add CPU work and can slightly increase live parsing latency. Higher values reduce overhead.
                     </div>
+                </div>
+                <div class="bomb-timer-banner" id="bombTimerBanner" hidden>
+                    <span class="bomb-timer-icon">💣</span>
+                    <span class="bomb-timer-text" id="bombTimerText">0.0s</span>
+                    <span class="bomb-timer-defuse" id="bombTimerDefuse" hidden></span>
                 </div>
                 <div class="advisory-banner" id="advisoryBanner">
                     <span class="advisory-text" id="advisoryText"></span>
@@ -96,10 +154,16 @@
                     </div>
                 </div>
                 <canvas id="radarCanvas" width="800" height="750"></canvas>
+                </div>
+                <div class="team-list team-list-ct" id="teamListCt">
+                    <h4 class="team-list-title">CT</h4>
+                    <div class="team-list-players" id="teamListCtPlayers"></div>
+                </div>
             </div>
 
             <!-- Side Panel -->
-            <div class="side-panel">
+            <div class="side-panel" id="sidePanel">
+                <div class="side-panel-resize-handle" id="sidePanelResizeHandle" title="Drag to resize"></div>
                 <!-- Score -->
                 <div class="scoreboard">
                     <div class="score-row">

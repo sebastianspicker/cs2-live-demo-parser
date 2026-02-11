@@ -106,7 +106,7 @@ export function updateAdvisory(client) {
     if (!active && client.advisory && now < client.advisoryExpiresAt) {
         text = client.advisory;
         active = true;
-    } else if (client.gameState && client.gameState.players) {
+    } else if (client.gameState && Array.isArray(client.gameState.players)) {
         const ctAlive = client.gameState.players.filter(p => p.team === "CT" && p.is_alive).length;
         const tAlive = client.gameState.players.filter(p => p.team === "T" && p.is_alive).length;
         if (ctAlive === 1 && tAlive > 1) {
@@ -126,8 +126,9 @@ export function updateAdvisory(client) {
     if (dismissBtn) {
         dismissBtn.style.display = active ? "inline-flex" : "none";
     }
-    banner.classList.remove("status-info", "status-warning", "status-error");
-    if (statusClass) {
+    const allowedStatusClasses = ["status-info", "status-warning", "status-error"];
+    banner.classList.remove(...allowedStatusClasses);
+    if (statusClass && allowedStatusClasses.includes(statusClass)) {
         banner.classList.add(statusClass);
     }
 

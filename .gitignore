@@ -51,6 +51,7 @@ test-results/
 .idea/
 .vscode/
 .cursor/
+.codex/
 
 # docs (local findings/logs/decisions)
 DECISIONS.md
@@ -68,3 +69,6 @@ maps/
 private/
 server/private_features/
 client/private_features/
+
+# External / reference repos (do not commit)
+other_repo_do_not_include/

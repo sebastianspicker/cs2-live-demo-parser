@@ -18,7 +18,7 @@ def test_strip_json5_removes_comments_and_trailing_commas():
     assert ",]" not in stripped
 
 
-def test_load_boltobserv_meta_parses_meta(tmp_path):
+def test_load_overview_meta_parses_meta(tmp_path):
     meta_dir = tmp_path / "de_test"
     meta_dir.mkdir(parents=True)
     meta_path = meta_dir / "meta.json5"
@@ -33,7 +33,7 @@ def test_load_boltobserv_meta_parses_meta(tmp_path):
         """,
         encoding="utf-8",
     )
-    bounds = config.load_boltobserv_meta(tmp_path)
+    bounds = config.load_overview_meta(tmp_path)
     assert "Test" in bounds
     entry = bounds["Test"]
     assert entry["min_x"] == -128.0

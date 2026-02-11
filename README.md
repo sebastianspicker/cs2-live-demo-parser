@@ -4,6 +4,19 @@ CS2 demo parser and WebSocket broadcaster for near real-time spectator overlays 
 
 Why: Provide low-latency, read-only demo telemetry for overlays without game memory access.
 
+---
+
+> **Small indie company corner** — How Valve “fixed” the issue two weeks after the bug was published on Reddit:
+>
+> ```
+> _record (cheat dontrecord release)
+> record (cheat dontrecord release)
+> ```
+>
+> That’s not a bugfix. The bug is still there—they just hid it. Competitive matches: command disabled. Everywhere else: same command, now gated behind `sv_cheats 1`. So instead of fixing the underlying issue, they swept it under the rug and called it a day. Legitimate use cases (e.g. local live radar from `record name` during a match) get broken in the process. Very clever.
+
+---
+
 ## Features
 - Incremental demo parsing with automatic map detection
 - Two modes: Live (tail newest demo file) and Manual (pick demo + playback controls)
@@ -15,7 +28,7 @@ Why: Provide low-latency, read-only demo telemetry for overlays without game mem
 - Live lag tracking with automatic poll tuning down to a configurable floor
 - demoparser2 backend from PyPI (friendly props like `X/Y/Z`, `yaw`, `health`)
 - Read-only demo analysis (no game memory access)
-- Optional Boltobserv map metadata support (GPL-3.0, see licensing note)
+- Optional map metadata from overview assets (see `maps/` in docs)
 
 ## Excluded features
 Some functionality is intentionally kept out of this repository and excluded
@@ -105,7 +118,7 @@ UI controls:
 - `maps/` (local-only, excluded for licensing). You may provide:
   - `maps/map_definitions.json`
   - `maps/world_bounds.json`
-  - `maps/boltobserv/` (upstream reference; GPL-3.0, optional)
+  - `maps/overviews/` – optional overview images and metadata, e.g. `de_*/meta.json5` (see docs; some assets may have separate licenses)
 
 ## License
 MIT. See `LICENSE`.

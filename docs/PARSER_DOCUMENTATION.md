@@ -50,30 +50,49 @@ The server can load fixed world bounds per map from `maps/world_bounds.json` to
 improve coordinate-to-radar mapping. If no fixed bounds are provided, it
 derives bounds dynamically from player positions observed in the demo.
 
+**Format (this project)**  
+We use **bounds-based** metadata: `world_bounds` with `min_x`, `max_x`, `min_y`, `max_y` (world units), plus optional `world_transform` (`flip_x`, `flip_y`, `rotate_deg`) and `z_range`. The client maps world coordinates to screen pixels with: `(x - min_x) / (max_x - min_x) * width` (and similarly for y), then applies transform/rotation.
+
+**Relation to pos_x / pos_y / scale metadata**  
+Some parsers use **pos_x, pos_y, scale** (e.g. from VDF): translate with `(x - pos_x, pos_y - y)` then scale by `1/scale` to get pixel coordinates. Our bounds are equivalent to a box: `min_x`, `max_x`, `min_y`, `max_y` define the same region; `scale` would be `(max_x - min_x) / imageWidth`. If you have overview assets that only provide pos_x/pos_y/scale, you can convert: e.g. `min_x = pos_x`, `max_x = pos_x + scale * imageWidth`, and similarly for y (accounting for y-flip if needed).
+
 Environment override:
 - `CS2_MAP_BOUNDS_FILE` (defaults to `maps/world_bounds.json`)
 - `CS2_OVERVIEW_DIR` (defaults to `maps/overviews`)
+- `CS2_OVERVIEW_META_DIR` (defaults to `maps/overviews`; directory for `de_*/meta.json5` metadata)
 - `CS2_MAP_DEFINITIONS_FILE` (defaults to `maps/map_definitions.json`)
 
 Map metadata defaults live in `maps/map_definitions.json`.
 
-## Boltobserv map data (GPL-3.0)
-The directory `maps/boltobserv/` contains upstream radar assets and `meta.json5`
-files copied from the Boltobserv project (GPL-3.0). Use these files only if the
-GPL-3.0 licensing is acceptable for your distribution. See
-`maps/boltobserv/LICENSE` and `maps/boltobserv/README.md` for upstream details.
+## Optional map metadata (meta.json5)
+The overview directory (default `maps/overviews/`) may contain per-map metadata in
+`de_*/meta.json5` files. If you use third-party assets there, check their license
+and any local LICENSE or README in that directory.
 
-The parser can derive `world_bounds` from Boltobserv `meta.json5` by reading
+The parser can derive `world_bounds` from such `meta.json5` by reading
 `resolution` and `offset`. This is used when `maps/world_bounds.json` does not
 define a map.
 
-If `zRange` is available in Boltobserv metadata, it is exposed as `z_range` and
+If `zRange` is available in the metadata, it is exposed as `z_range` and
 used by the client to scale player dots by height (useful for Nuke/Vertigo).
 
 ## Update loop
 - Parses a moving tick window (`tick_window`) from the demo
 - Tracks players, bomb status, round info, and events
 - Emits state updates at the configured poll interval
+
+## Parsing strategy, update interval, and latency
+
+**Incremental parsing (this project)**  
+The server only parses **new ticks** since the last run: it advances a tick window (`parse_ticks(start_tick, tick_window)`) and sends the latest game state. It does **not** re-parse the entire demo on each update. This keeps CPU and I/O low and scales well for long-running live recordings.
+
+**Alternative: full-demo parse per update**  
+Some reference implementations (e.g. Go-based live radars) re-open the demo and call a “parse to end” on every file change. That gives a single, consistent “last frame” but becomes expensive as the file grows. We keep incremental parsing as the default.
+
+**Poll interval and latency**  
+- Server: `--poll-interval` (default `0.8` s) is how often the parser checks the demo file and emits updates. Lower values (e.g. `0.1`–`0.2`) reduce latency but increase CPU. The server can auto-tune down to `CS2_MIN_POLL_INTERVAL` (default `0.2`) when live lag is high.
+- Client: Updates are pushed over WebSocket as soon as the server produces them; no client polling.
+- End-to-end latency is roughly: file write delay + poll interval + parse time + network. For low-latency LAN use, consider `--poll-interval 0.2` (or lower if the machine can keep up).
 
 ## WebSocket message format
 Clients receive JSON or MsgPack payloads. MsgPack uses the same fields as JSON.
@@ -179,3 +198,12 @@ Run the server with `--metrics-port` to expose basic JSON stats:
 python server/main.py --metrics-port 8766
 ```
 Endpoint: `http://localhost:8766/metrics`
+
+## Future work: dropped items (weapons, defuse kits on map)
+
+We do **not** currently show dropped weapons or defuse kits on the radar. Parsers that do use a full game-state API (e.g. iterate all weapons, filter by no owner, read entity positions). Our stack uses **demoparser2** with tick-based entity properties (player-centric); it does not expose a ready-made “all weapons without owner” list. Adding dropped items would require either:
+
+- A separate entity/prop pass in demoparser2 (if it can return weapon entities and owner handles per tick), or  
+- A different or additional library that provides game-state-style access.
+
+The client already has settings “Show kits on map” and “Show weapons on map” so that when server-side support is added, the UI can toggle them without further changes.

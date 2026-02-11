@@ -201,6 +201,11 @@ def get_overview_dir() -> Path:
     return _default_path("CS2_OVERVIEW_DIR", "maps/overviews")
 
 
+def get_overview_meta_dir() -> Path:
+    """Directory for overview metadata (e.g. de_*/meta.json5). Defaults to overview dir."""
+    return _default_path("CS2_OVERVIEW_META_DIR", "maps/overviews")
+
+
 def get_config_path() -> Path:
     return _default_path("CS2_CONFIG_FILE", "config.json")
 
@@ -216,14 +221,15 @@ def _strip_json5(text: str) -> str:
     return text
 
 
-def _normalize_boltobserv_name(folder_name: str) -> str:
+def _normalize_map_folder_name(folder_name: str) -> str:
     name = folder_name.lower()
     if name.startswith("de_"):
         name = name[3:]
     return name.capitalize() if name else folder_name
 
 
-def load_boltobserv_meta(base_dir: Path) -> dict:
+def load_overview_meta(base_dir: Path) -> dict:
+    """Load world bounds from overview metadata (e.g. de_*/meta.json5)."""
     bounds = {}
     if not base_dir.exists():
         return bounds
@@ -248,7 +254,7 @@ def load_boltobserv_meta(base_dir: Path) -> dict:
         min_y = -offset_y
         max_x = min_x + (resolution_value * radar_size)
         max_y = min_y + (resolution_value * radar_size)
-        map_key = _normalize_boltobserv_name(meta_path.parent.name)
+        map_key = _normalize_map_folder_name(meta_path.parent.name)
         entry = {
             "min_x": min(min_x, max_x),
             "max_x": max(min_x, max_x),

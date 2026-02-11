@@ -26,25 +26,38 @@ def _get_vector(
 ) -> Tuple[Optional[float], Optional[float], Optional[float]]:
     value = row.get(base)
     if isinstance(value, (list, tuple)) and len(value) >= 2:
-        x = float(value[0])
-        y = float(value[1])
-        z = float(value[2]) if len(value) >= 3 else 0.0
-        return x, y, z
+        try:
+            x = float(value[0])
+            y = float(value[1])
+            z = float(value[2]) if len(value) >= 3 else 0.0
+            if not (x != x or y != y or z != z):  # reject NaN
+                return x, y, z
+        except (TypeError, ValueError):
+            pass
     x = _get_value(row, [f"{base}_x", f"{base}.X", f"{base}.x", f"{base}[0]"])
     y = _get_value(row, [f"{base}_y", f"{base}.Y", f"{base}.y", f"{base}[1]"])
     z = _get_value(row, [f"{base}_z", f"{base}.Z", f"{base}.z", f"{base}[2]"])
     if x is None or y is None:
         return None, None, None
-    return float(x), float(y), float(z or 0.0)
+    try:
+        return float(x), float(y), float(z or 0.0)
+    except (TypeError, ValueError):
+        return None, None, None
 
 
 def _get_yaw(row: Dict[str, Any]) -> float:
     yaw = _get_value(row, ["yaw", "m_angEyeAngles_y", "m_angEyeAngles.Y", "m_angEyeAngles.y"])
     if yaw is not None:
-        return float(yaw)
+        try:
+            return float(yaw)
+        except (TypeError, ValueError):
+            pass
     value = row.get("m_angEyeAngles")
     if isinstance(value, (list, tuple)) and len(value) >= 2:
-        return float(value[1])
+        try:
+            return float(value[1])
+        except (TypeError, ValueError, IndexError):
+            pass
     return 0.0
 
 
@@ -90,18 +103,49 @@ def build_players(
         if life_state is None:
             is_alive = health_int > 0
         else:
-            is_alive = life_state == 0
+            try:
+                is_alive = int(life_state) == 0
+            except (TypeError, ValueError):
+                is_alive = health_int > 0
         armor = row.get("armor_value") or 0
         try:
             armor_int = int(armor)
         except Exception:
             armor_int = 0
         helmet = bool(row.get("has_helmet") or False)
+        has_defuser = bool(row.get("m_bHasDefuser") or row.get("has_defuser") or False)
         money = row.get("balance")
         try:
             money_value = int(money) if money is not None else 0
         except Exception:
             money_value = 0
+
+        kills = _get_value(row, ["m_iKills", "kills"])
+        deaths = _get_value(row, ["m_iDeaths", "deaths"])
+        assists = _get_value(row, ["m_iAssists", "assists"])
+        try:
+            kills_int = int(kills) if kills is not None else 0
+        except (TypeError, ValueError):
+            kills_int = 0
+        try:
+            deaths_int = int(deaths) if deaths is not None else 0
+        except (TypeError, ValueError):
+            deaths_int = 0
+        try:
+            assists_int = int(assists) if assists is not None else 0
+        except (TypeError, ValueError):
+            assists_int = 0
+
+        is_scoped = bool(row.get("m_bIsScoped") or False)
+        is_defusing = bool(row.get("m_bIsDefusing") or False)
+        is_planting = bool(row.get("m_bIsPlanting") or False)
+
+        primary_weapon = _get_value(row, ["primary_weapon", "active_weapon", "weapon"])
+        secondary_weapon = _get_value(row, ["secondary_weapon"])
+        primary_weapon = str(primary_weapon).strip() if primary_weapon is not None else ""
+        secondary_weapon = str(secondary_weapon).strip() if secondary_weapon is not None else ""
+        if not primary_weapon:
+            primary_weapon = "Unknown"
 
         x = row.get("X")
         y = row.get("Y")
@@ -109,6 +153,14 @@ def build_players(
         if x is None or y is None:
             x, y, z = _get_vector(row, "m_vecOrigin")
         if x is None or y is None:
+            continue
+        try:
+            x = float(x)
+            y = float(y)
+            z = float(z) if z is not None else 0.0
+        except (TypeError, ValueError):
+            continue
+        if x != x or y != y:  # reject NaN
             continue
         if not fixed_bounds:
             update_world_bounds(world_bounds, x, y)
@@ -135,8 +187,17 @@ def build_players(
                 "health": health_int,
                 "armor": armor_int,
                 "has_helmet": helmet,
+                "has_defuser": has_defuser,
                 "money": money_value,
-                "weapon": "Unknown",
+                "weapon": primary_weapon,
+                "primary_weapon": primary_weapon,
+                "secondary_weapon": secondary_weapon or None,
+                "kills": kills_int,
+                "deaths": deaths_int,
+                "assists": assists_int,
+                "is_planting": is_planting,
+                "is_defusing": is_defusing,
+                "is_scoped": is_scoped,
             }
         )
 

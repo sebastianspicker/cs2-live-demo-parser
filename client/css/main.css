@@ -78,12 +78,106 @@
             50% { opacity: 0.5; }
         }
 
+        /* Mini radar layout: only radar, no header/sidebar (e.g. ?mini=1 for second monitor) */
+        body.mini-radar .header,
+        body.mini-radar .side-panel,
+        body.mini-radar .bottom-panels { display: none !important; }
+        body.mini-radar .team-list { display: none !important; }
+        body.mini-radar .grid-main {
+            grid-template-columns: 1fr;
+            margin-bottom: 0;
+            height: 100vh;
+        }
+        body.mini-radar .main-content-wrap { grid-template-columns: 1fr; }
+        body.mini-radar .radar-container {
+            padding: 0;
+            border-radius: 0;
+            border: none;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+        }
+        body.mini-radar .radar-header,
+        body.mini-radar .sampling-hint,
+        body.mini-radar .playback-controls,
+        body.mini-radar .advisory-banner,
+        body.mini-radar .bomb-timer-banner { display: none !important; }
+        body.mini-radar #radarCanvas { flex: 1; width: 100% !important; height: 100% !important; }
+        body.mini-radar .container { max-width: none; }
+
         /* Main Grid */
         .grid-main {
             display: grid;
             grid-template-columns: 1fr 350px;
             gap: 20px;
             margin-bottom: 20px;
+        }
+
+        .main-content-wrap {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 0;
+            min-width: 0;
+        }
+
+        .grid-main.layout-radar-center .main-content-wrap {
+            grid-template-columns: 200px 1fr 200px;
+            gap: 12px;
+        }
+
+        .team-list {
+            display: none;
+            background: var(--bg-card);
+            border-radius: 8px;
+            padding: 12px;
+            border: 1px solid var(--text-secondary);
+            overflow: auto;
+        }
+
+        .grid-main.layout-radar-center .team-list {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .team-list-title {
+            font-size: 14px;
+            margin-bottom: 8px;
+            text-align: center;
+        }
+
+        .team-list-t .team-list-title { color: var(--t-color); }
+        .team-list-ct .team-list-title { color: var(--ct-color); }
+
+        .team-list-players {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .team-list-player {
+            font-size: 11px;
+            padding: 6px 8px;
+            border-radius: 4px;
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .team-list-player.dead {
+            opacity: 0.5;
+        }
+
+        .team-list-player .player-name { font-weight: 600; display: block; }
+        .team-list-player .player-stats { color: var(--text-secondary); margin-top: 2px; }
+        .team-list-player .player-weapons { font-size: 11px; color: var(--text-secondary); display: block; margin-top: 2px; }
+        .team-list-player .player-indicators { font-size: 10px; color: var(--primary); display: block; margin-top: 2px; }
+
+        .layout-selector {
+            background: transparent;
+            border: 1px solid var(--primary);
+            color: var(--primary);
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            cursor: pointer;
         }
 
         /* Radar/Map */
@@ -105,6 +199,30 @@
             color: var(--text-secondary);
             flex-wrap: wrap;
             gap: 10px;
+        }
+
+        .bomb-timer-banner {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            background: rgba(255, 56, 96, 0.2);
+            border: 1px solid rgba(255, 56, 96, 0.5);
+            color: #ffd3dc;
+            font-size: 14px;
+            font-weight: 600;
+            padding: 8px 14px;
+            border-radius: 6px;
+            margin-bottom: 10px;
+        }
+
+        .bomb-timer-banner[hidden] {
+            display: none;
+        }
+
+        .bomb-timer-defuse {
+            color: #00ff88;
+            font-size: 12px;
         }
 
         .advisory-banner {
@@ -246,6 +364,82 @@
             cursor: pointer;
         }
 
+        .radar-settings-wrap {
+            position: relative;
+        }
+
+        .settings-btn {
+            background: transparent;
+            border: 1px solid var(--primary);
+            color: var(--primary);
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+
+        .settings-btn:hover {
+            background: rgba(0, 212, 255, 0.1);
+        }
+
+        .radar-settings-panel {
+            position: absolute;
+            top: 100%;
+            right: 0;
+            margin-top: 6px;
+            min-width: 220px;
+            background: var(--bg-card);
+            border: 1px solid var(--primary);
+            border-radius: 8px;
+            padding: 12px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+            z-index: 100;
+        }
+
+        .radar-settings-panel[hidden] {
+            display: none;
+        }
+
+        .radar-settings-title {
+            font-size: 13px;
+            color: var(--text-primary);
+            margin-bottom: 10px;
+        }
+
+        .radar-settings-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 8px;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .radar-settings-row label {
+            flex: 0 0 70px;
+        }
+
+        .radar-settings-row input[type="range"] {
+            flex: 1;
+            accent-color: var(--primary);
+        }
+
+        .radar-settings-value {
+            flex: 0 0 28px;
+            text-align: right;
+            font-family: monospace;
+        }
+
+        .radar-settings-check {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 6px;
+            font-size: 12px;
+            color: var(--text-secondary);
+            cursor: pointer;
+        }
+
         .playback-controls {
             display: flex;
             flex-direction: column;
@@ -347,10 +541,32 @@
         }
 
         /* Side Panel */
+        .grid-main {
+            grid-template-columns: 1fr auto;
+        }
         .side-panel {
             display: flex;
             flex-direction: column;
             gap: 15px;
+            width: 350px;
+            min-width: 250px;
+            max-width: 600px;
+            position: relative;
+        }
+        .side-panel-resize-handle {
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 6px;
+            cursor: ew-resize;
+            background: transparent;
+            z-index: 1;
+        }
+        .side-panel-resize-handle:hover,
+        .side-panel-resize-handle.resizing {
+            background: var(--primary);
+            opacity: 0.3;
         }
 
         .info-card {

@@ -2,6 +2,65 @@ import { msgpack_decode } from "./msgpack.js";
 import { processEvents, updateAdvisory } from "./events.js";
 import { renderRadar, updateTrails, getInterpolatedPlayers } from "./render.js";
 
+const RADAR_SETTINGS_KEY = "cs2_radar_settings";
+const DEFAULT_RADAR_SETTINGS = {
+    dotSize: 1,
+    bombSize: 0.5,
+    showAllyNames: false,
+    showEnemyNames: true,
+    showViewCones: false,
+    mapTeamFilter: "all",
+    showBombOnMap: true,
+    showKitsOnMap: true,
+    showWeaponsOnMap: true,
+    viewRotation: 0,
+};
+
+function loadRadarSettings() {
+    try {
+        const raw = localStorage.getItem(RADAR_SETTINGS_KEY);
+        if (!raw) return { ...DEFAULT_RADAR_SETTINGS };
+        const parsed = JSON.parse(raw);
+        const dotSize = typeof parsed.dotSize === "number" && Number.isFinite(parsed.dotSize)
+            ? parsed.dotSize : DEFAULT_RADAR_SETTINGS.dotSize;
+        const bombSize = typeof parsed.bombSize === "number" && Number.isFinite(parsed.bombSize)
+            ? parsed.bombSize : DEFAULT_RADAR_SETTINGS.bombSize;
+        const mapTeamFilter = parsed.mapTeamFilter === "t" || parsed.mapTeamFilter === "ct" ? parsed.mapTeamFilter : "all";
+        return {
+            ...DEFAULT_RADAR_SETTINGS,
+            ...parsed,
+            dotSize,
+            bombSize,
+            showAllyNames: !!parsed.showAllyNames,
+            showEnemyNames: parsed.showEnemyNames !== false,
+            showViewCones: !!parsed.showViewCones,
+            mapTeamFilter,
+            showBombOnMap: parsed.showBombOnMap !== false,
+            showKitsOnMap: parsed.showKitsOnMap !== false,
+            showWeaponsOnMap: parsed.showWeaponsOnMap !== false,
+            viewRotation: [0, 90, 180, 270].includes(Number(parsed.viewRotation)) ? Number(parsed.viewRotation) : 0,
+        };
+    } catch {
+        return { ...DEFAULT_RADAR_SETTINGS };
+    }
+}
+
+function saveRadarSettings(settings) {
+    try {
+        localStorage.setItem(RADAR_SETTINGS_KEY, JSON.stringify(settings));
+    } catch (_) {}
+}
+
+const LAYOUT_KEY = "cs2_layout";
+function loadLayoutMode() {
+    try {
+        const v = localStorage.getItem(LAYOUT_KEY);
+        if (v === "radar_center" || v === "center") return "radar_center";
+        if (v === "default") return "default";
+    } catch (_) {}
+    return "default";
+}
+
 class UIController {
     constructor() {
         this.elements = new Map();
@@ -32,32 +91,40 @@ class UIController {
 
     updateConnectionStatus(connected) {
         if (connected) {
-            this.statusIndicator.classList.remove("disconnected");
-            this.statusIndicator.classList.add("connected");
+            if (this.statusIndicator) {
+                this.statusIndicator.classList.remove("disconnected");
+                this.statusIndicator.classList.add("connected");
+            }
             if (this.panelIndicator) {
                 this.panelIndicator.classList.remove("disconnected");
                 this.panelIndicator.classList.add("connected");
             }
-            this.connectionStatus.classList.remove("disconnected");
-            this.connectionStatus.classList.add("connected");
-            this.statusText.textContent = "✅ Connected";
+            if (this.connectionStatus) {
+                this.connectionStatus.classList.remove("disconnected");
+                this.connectionStatus.classList.add("connected");
+            }
+            if (this.statusText) this.statusText.textContent = "✅ Connected";
             if (this.headerStatus) this.headerStatus.textContent = "Connected";
         } else {
-            this.statusIndicator.classList.remove("connected");
-            this.statusIndicator.classList.add("disconnected");
+            if (this.statusIndicator) {
+                this.statusIndicator.classList.remove("connected");
+                this.statusIndicator.classList.add("disconnected");
+            }
             if (this.panelIndicator) {
                 this.panelIndicator.classList.remove("connected");
                 this.panelIndicator.classList.add("disconnected");
             }
-            this.connectionStatus.classList.remove("connected");
-            this.connectionStatus.classList.add("disconnected");
-            this.statusText.textContent = "❌ Reconnecting...";
+            if (this.connectionStatus) {
+                this.connectionStatus.classList.remove("connected");
+                this.connectionStatus.classList.add("disconnected");
+            }
+            if (this.statusText) this.statusText.textContent = "❌ Reconnecting...";
             if (this.headerStatus) this.headerStatus.textContent = "Reconnecting...";
         }
     }
 
     updateDemoList(demos) {
-        if (!this.demoSelect) return;
+        if (!this.demoSelect || !Array.isArray(demos)) return;
         const current = this.demoSelect.value;
         this.demoSelect.textContent = "";
         const placeholder = document.createElement("option");
@@ -102,7 +169,7 @@ class CS2BroadcasterClient {
         this.lastState = null;
         this.currentState = null;
         this.canvas = document.getElementById("radarCanvas");
-        this.ctx = this.canvas.getContext("2d");
+        this.ctx = this.canvas ? this.canvas.getContext("2d") : null;
         this.lastUpdateTime = Date.now();
         this.frameCount = 0;
         this.updateHistory = [];
@@ -149,9 +216,19 @@ class CS2BroadcasterClient {
         this.mapRetryTimers = new Map();
         this.ui = new UIController();
         this.msgpackRefreshInterval = 10;
+        this.radarSettings = loadRadarSettings();
+        this.deadLastPosition = new Map();
+        this.layoutMode = this.loadLayoutMode();
         this.ui.setPlaybackEnabled(this.mode === "manual");
 
+        const urlParams = new URLSearchParams(window.location.search);
+        this.miniRadarMode = urlParams.get("mini") === "1" || urlParams.get("layout") === "mini";
+        if (this.miniRadarMode) {
+            document.body.classList.add("mini-radar");
+        }
         this.loadClientConfig();
+        this.applyRadarSettingsToUI();
+        this.applyLayoutMode();
         this.connect();
         this.setupEventListeners();
         this.startRenderLoop();
@@ -423,6 +500,7 @@ class CS2BroadcasterClient {
         if (!this.gameState) return;
 
         const data = this.gameState;
+        const players = Array.isArray(data.players) ? data.players : [];
         const get = (id) => this.ui.getElement(id);
 
         const ctScoreEl = get("ctScore");
@@ -433,11 +511,39 @@ class CS2BroadcasterClient {
         const roundNumberEl = get("roundNumber");
         const roundTimeEl = get("roundTime");
         const bombStatusEl = get("bombStatus");
-        if (roundNumberEl) roundNumberEl.textContent = data.round;
+        if (roundNumberEl) roundNumberEl.textContent = data.round != null ? data.round : "0";
         if (roundTimeEl) {
-            roundTimeEl.textContent = `${Math.floor(data.time / 60)}:${String(Math.floor(data.time % 60)).padStart(2, "0")}`;
+            const t = Number(data.time);
+            const mins = Number.isFinite(t) ? Math.floor(t / 60) : 0;
+            const secs = Number.isFinite(t) ? Math.floor(t % 60) : 0;
+            roundTimeEl.textContent = `${mins}:${String(secs).padStart(2, "0")}`;
         }
         if (bombStatusEl) bombStatusEl.textContent = data.bomb_planted ? "💣 PLANTED" : "Safe";
+
+        const bombTimerBanner = get("bombTimerBanner");
+        const bombTimerText = get("bombTimerText");
+        const bombTimerDefuse = get("bombTimerDefuse");
+        if (bombTimerBanner && bombTimerText) {
+            const bomb = data.bomb;
+            const planted = bomb && (bomb.planted || data.bomb_planted);
+            const blowTime = bomb && typeof bomb.blow_time_sec === "number" && Number.isFinite(bomb.blow_time_sec);
+            if (planted && blowTime && bomb.blow_time_sec >= 0) {
+                bombTimerBanner.hidden = false;
+                bombTimerText.textContent = `${bomb.blow_time_sec.toFixed(1)}s`;
+                if (bombTimerDefuse) {
+                    if (bomb.is_defusing && typeof bomb.defuse_time_sec === "number") {
+                        bombTimerDefuse.hidden = false;
+                        bombTimerDefuse.textContent = ` (${bomb.defuse_time_sec.toFixed(1)}s)`;
+                    } else {
+                        bombTimerDefuse.hidden = true;
+                        bombTimerDefuse.textContent = "";
+                    }
+                }
+            } else {
+                bombTimerBanner.hidden = true;
+                if (bombTimerDefuse) bombTimerDefuse.hidden = true;
+            }
+        }
 
         const ctBankEl = get("ctBank");
         const tBankEl = get("tBank");
@@ -454,13 +560,17 @@ class CS2BroadcasterClient {
         const playerCountEl = get("playerCount");
         if (playerCountEl) {
             const aliveTotal = (data.alive_ct || 0) + (data.alive_t || 0);
-            const alive = aliveTotal || data.players.filter(p => p.is_alive).length;
+            const alive = aliveTotal || players.filter(p => p.is_alive).length;
             playerCountEl.textContent = `${alive}/10`;
         }
 
         const economyEl = get("playerEconomy");
-        if (economyEl && data.players && data.players.length > 0) {
-            this.renderPlayerEconomy(economyEl, data.players);
+        if (economyEl && players.length > 0) {
+            this.renderPlayerEconomy(economyEl, players);
+        }
+
+        if (this.layoutMode === "radar_center" && players.length >= 0) {
+            this.renderTeamLists(players, data.bomb);
         }
 
         if (data.kill_feed && data.kill_feed.length > 0) {
@@ -480,7 +590,7 @@ class CS2BroadcasterClient {
         if (compressionRateEl) compressionRateEl.textContent = `${this.compressionRate.toFixed(1)}%`;
         if (playersAliveEl) {
             const aliveTotal = (data.alive_ct || 0) + (data.alive_t || 0);
-            playersAliveEl.textContent = aliveTotal || data.players.filter(p => p.is_alive).length;
+            playersAliveEl.textContent = aliveTotal || players.filter(p => p.is_alive).length;
         }
         if (latencyEstEl) {
             if (this.mode === "live") {
@@ -575,6 +685,54 @@ class CS2BroadcasterClient {
     }
 
     setupEventListeners() {
+        const layoutSelector = this.ui.getElement("layoutSelector");
+        if (layoutSelector) {
+            layoutSelector.addEventListener("change", (e) => {
+                this.layoutMode = e.target.value === "radar_center" ? "radar_center" : "default";
+                try { localStorage.setItem(LAYOUT_KEY, this.layoutMode); } catch (_) {}
+                this.applyLayoutMode();
+                if (this.gameState && this.gameState.players) this.renderTeamLists(this.gameState.players, this.gameState.bomb);
+            });
+        }
+        const openMiniRadarBtn = document.getElementById("openMiniRadarBtn");
+        if (openMiniRadarBtn) {
+            openMiniRadarBtn.addEventListener("click", () => {
+                const base = window.location.href.split("?")[0];
+                const sep = base.includes("?") ? "&" : "?";
+                const miniUrl = base + sep + "mini=1";
+                window.open(miniUrl, "cs2_mini_radar", "width=800,height=600,resizable=yes,scrollbars=no");
+            });
+        }
+        const sidePanel = document.getElementById("sidePanel");
+        const sidePanelResizeHandle = document.getElementById("sidePanelResizeHandle");
+        if (sidePanel && sidePanelResizeHandle) {
+            let sidePanelResizing = false;
+            let sidePanelStartX = 0;
+            let sidePanelStartWidth = 0;
+            sidePanelResizeHandle.addEventListener("mousedown", (e) => {
+                e.preventDefault();
+                sidePanelResizing = true;
+                sidePanelStartX = e.clientX;
+                sidePanelStartWidth = sidePanel.offsetWidth;
+                sidePanelResizeHandle.classList.add("resizing");
+                document.body.style.cursor = "ew-resize";
+                document.body.style.userSelect = "none";
+            });
+            document.addEventListener("mousemove", (e) => {
+                if (!sidePanelResizing) return;
+                const delta = sidePanelStartX - e.clientX;
+                const newWidth = Math.min(600, Math.max(250, sidePanelStartWidth + delta));
+                sidePanel.style.width = newWidth + "px";
+            });
+            document.addEventListener("mouseup", () => {
+                if (sidePanelResizing) {
+                    sidePanelResizing = false;
+                    sidePanelResizeHandle.classList.remove("resizing");
+                    document.body.style.cursor = "";
+                    document.body.style.userSelect = "";
+                }
+            });
+        }
         const mapSelector = this.ui.getElement("mapSelector");
         if (mapSelector) {
             mapSelector.addEventListener("change", (e) => {
@@ -686,6 +844,7 @@ class CS2BroadcasterClient {
                 this.localStatusExpiresAt = 0;
             });
         }
+        this.setupRadarSettingsListeners();
     }
 
     sendSeek(timeSeconds) {
@@ -749,8 +908,8 @@ class CS2BroadcasterClient {
             this.mapImages.delete(key);
         }
         const candidates = [
-            `../maps/boltobserv/de_${key}/radar.png`,
-            `../maps/boltobserv/${key}/radar.png`,
+            `../maps/overviews/de_${key}/radar.png`,
+            `../maps/overviews/${key}/radar.png`,
         ];
         const attempt = this.mapImageAttempts.get(key) || { index: 0, retries: 0 };
         if (attempt.index >= candidates.length) {
@@ -819,8 +978,211 @@ class CS2BroadcasterClient {
                     const toggle = document.getElementById("toggleSmooth");
                     if (toggle) toggle.checked = this.enableSmoothing;
                 }
+                this.applyRadarSettingsToUI();
             })
             .catch(() => {});
+    }
+
+    applyLayoutMode() {
+        const grid = this.ui.getElement("gridMain");
+        const sel = this.ui.getElement("layoutSelector");
+        if (grid) grid.classList.toggle("layout-radar-center", this.layoutMode === "radar_center");
+        if (sel) sel.value = this.layoutMode;
+    }
+
+    renderTeamLists(players, bomb) {
+        const tEl = this.ui.getElement("teamListTPlayers");
+        const ctEl = this.ui.getElement("teamListCtPlayers");
+        if (!tEl || !ctEl) return;
+        const tPlayers = players.filter(p => p.team === "T");
+        const ctPlayers = players.filter(p => p.team === "CT");
+        const bombCarrier = bomb && !bomb.planted && bomb.planter ? bomb.planter : null;
+        const renderOne = (listEl, list, showBombCarrier = false) => {
+            this.clearElement(listEl);
+            list.forEach(p => {
+                const row = document.createElement("div");
+                row.className = "team-list-player" + (p.is_alive ? "" : " dead");
+                const nameSpan = document.createElement("span");
+                nameSpan.className = "player-name";
+                nameSpan.textContent = p.name || "Unknown";
+                if (p.has_defuser) {
+                    const def = document.createElement("span");
+                    def.className = "team-list-defuser";
+                    def.title = "Has defuser";
+                    def.textContent = " 🛡";
+                    nameSpan.appendChild(def);
+                }
+                if (showBombCarrier && bombCarrier && p.name === bombCarrier) {
+                    const bomb = document.createElement("span");
+                    bomb.className = "team-list-bomb";
+                    bomb.title = "Bomb carrier";
+                    bomb.textContent = " 💣";
+                    nameSpan.appendChild(bomb);
+                }
+                row.appendChild(nameSpan);
+                const statsSpan = document.createElement("span");
+                statsSpan.className = "player-stats";
+                let statsText = `$${p.money ?? 0} · ${p.health ?? 0} HP · ${p.armor ?? 0} armor`;
+                if (typeof p.kills === "number" || typeof p.deaths === "number" || typeof p.assists === "number") {
+                    statsText += ` · K/D/A ${p.kills ?? 0}/${p.deaths ?? 0}/${p.assists ?? 0}`;
+                }
+                statsSpan.textContent = statsText;
+                row.appendChild(statsSpan);
+                if (p.primary_weapon || p.secondary_weapon) {
+                    const wepSpan = document.createElement("span");
+                    wepSpan.className = "player-weapons";
+                    wepSpan.textContent = [p.primary_weapon, p.secondary_weapon].filter(Boolean).join(" / ");
+                    row.appendChild(wepSpan);
+                }
+                const indicators = [];
+                if (p.is_planting) indicators.push("PLANT");
+                if (p.is_defusing) indicators.push("DEFUSE");
+                if (p.is_scoped) indicators.push("SCOPED");
+                if (indicators.length) {
+                    const indSpan = document.createElement("span");
+                    indSpan.className = "player-indicators";
+                    indSpan.textContent = indicators.join(" · ");
+                    row.appendChild(indSpan);
+                }
+                listEl.appendChild(row);
+            });
+        };
+        renderOne(tEl, tPlayers, true);
+        renderOne(ctEl, ctPlayers, false);
+    }
+
+    applyRadarSettingsToUI() {
+        const s = this.radarSettings;
+        const dotSize = Number.isFinite(s.dotSize) ? s.dotSize : DEFAULT_RADAR_SETTINGS.dotSize;
+        const bombSize = Number.isFinite(s.bombSize) ? s.bombSize : DEFAULT_RADAR_SETTINGS.bombSize;
+        const dotEl = document.getElementById("settingDotSize");
+        const dotVal = document.getElementById("settingDotSizeValue");
+        const bombEl = document.getElementById("settingBombSize");
+        const bombVal = document.getElementById("settingBombSizeValue");
+        const allyEl = document.getElementById("settingShowAllyNames");
+        const enemyEl = document.getElementById("settingShowEnemyNames");
+        const coneEl = document.getElementById("settingShowViewCones");
+        const mapTeamEl = document.getElementById("settingMapTeamFilter");
+        const bombOnMapEl = document.getElementById("settingShowBombOnMap");
+        const kitsOnMapEl = document.getElementById("settingShowKitsOnMap");
+        const weaponsOnMapEl = document.getElementById("settingShowWeaponsOnMap");
+        if (dotEl) { dotEl.value = String(dotSize); }
+        if (dotVal) dotVal.textContent = String(dotSize);
+        if (bombEl) { bombEl.value = String(bombSize); }
+        if (bombVal) bombVal.textContent = String(bombSize);
+        if (allyEl) allyEl.checked = s.showAllyNames;
+        if (enemyEl) enemyEl.checked = s.showEnemyNames;
+        if (coneEl) coneEl.checked = s.showViewCones;
+        const viewRotationEl = document.getElementById("settingViewRotation");
+        if (viewRotationEl) viewRotationEl.value = String(s.viewRotation ?? 0);
+        if (mapTeamEl) mapTeamEl.value = s.mapTeamFilter || "all";
+        if (bombOnMapEl) bombOnMapEl.checked = s.showBombOnMap !== false;
+        if (kitsOnMapEl) kitsOnMapEl.checked = s.showKitsOnMap !== false;
+        if (weaponsOnMapEl) weaponsOnMapEl.checked = s.showWeaponsOnMap !== false;
+    }
+
+    setupRadarSettingsListeners() {
+        const panel = document.getElementById("radarSettingsPanel");
+        const btn = document.getElementById("radarSettingsBtn");
+        if (btn && panel) {
+            btn.addEventListener("click", () => {
+                const hidden = panel.hidden;
+                panel.hidden = !hidden;
+            });
+        }
+        if (!this._settingsPanelClickRegistered) {
+            this._settingsPanelClickRegistered = true;
+            document.addEventListener("click", (e) => {
+                const panel = document.getElementById("radarSettingsPanel");
+                const wrap = document.querySelector(".radar-settings-wrap");
+                if (panel && wrap && !panel.hidden && !wrap.contains(e.target)) {
+                    panel.hidden = true;
+                }
+            });
+        }
+
+        if (this._settingsInputsRegistered) return;
+        this._settingsInputsRegistered = true;
+
+        const updateSetting = (key, value) => {
+            this.radarSettings[key] = value;
+            saveRadarSettings(this.radarSettings);
+        };
+
+        const dotEl = document.getElementById("settingDotSize");
+        const dotVal = document.getElementById("settingDotSizeValue");
+        if (dotEl && dotVal) {
+            dotEl.addEventListener("input", () => {
+                const v = parseFloat(dotEl.value);
+                if (!Number.isNaN(v)) {
+                    this.radarSettings.dotSize = v;
+                    dotVal.textContent = String(v);
+                    saveRadarSettings(this.radarSettings);
+                }
+            });
+        }
+
+        const bombEl = document.getElementById("settingBombSize");
+        const bombVal = document.getElementById("settingBombSizeValue");
+        if (bombEl && bombVal) {
+            bombEl.addEventListener("input", () => {
+                const v = parseFloat(bombEl.value);
+                if (!Number.isNaN(v)) {
+                    this.radarSettings.bombSize = v;
+                    bombVal.textContent = String(v);
+                    saveRadarSettings(this.radarSettings);
+                }
+            });
+        }
+
+        const allyEl = document.getElementById("settingShowAllyNames");
+        if (allyEl) {
+            allyEl.addEventListener("change", () => {
+                updateSetting("showAllyNames", allyEl.checked);
+            });
+        }
+        const enemyEl = document.getElementById("settingShowEnemyNames");
+        if (enemyEl) {
+            enemyEl.addEventListener("change", () => {
+                updateSetting("showEnemyNames", enemyEl.checked);
+            });
+        }
+        const coneEl = document.getElementById("settingShowViewCones");
+        if (coneEl) {
+            coneEl.addEventListener("change", () => {
+                updateSetting("showViewCones", coneEl.checked);
+            });
+        }
+        const viewRotationEl = document.getElementById("settingViewRotation");
+        if (viewRotationEl) {
+            viewRotationEl.addEventListener("change", () => {
+                updateSetting("viewRotation", parseInt(viewRotationEl.value, 10));
+            });
+        }
+        const mapTeamEl = document.getElementById("settingMapTeamFilter");
+        if (mapTeamEl) {
+            mapTeamEl.addEventListener("change", () => {
+                updateSetting("mapTeamFilter", mapTeamEl.value);
+            });
+        }
+        const bombOnMapEl = document.getElementById("settingShowBombOnMap");
+        if (bombOnMapEl) {
+            bombOnMapEl.addEventListener("change", () => {
+                updateSetting("showBombOnMap", bombOnMapEl.checked);
+            });
+        }
+        const kitsOnMapEl = document.getElementById("settingShowKitsOnMap");
+        if (kitsOnMapEl) {
+            kitsOnMapEl.addEventListener("change", () => {
+                updateSetting("showKitsOnMap", kitsOnMapEl.checked);
+            });
+        }
+        const weaponsOnMapEl = document.getElementById("settingShowWeaponsOnMap");
+        if (weaponsOnMapEl) {
+            weaponsOnMapEl.addEventListener("change", () => {
+                updateSetting("showWeaponsOnMap", weaponsOnMapEl.checked);
+            });
+        }
     }
 }
 

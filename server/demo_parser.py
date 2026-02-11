@@ -12,7 +12,8 @@ from config import (
     MAP_DEFINITIONS,
     get_bounds_path,
     get_overview_dir,
-    load_boltobserv_meta,
+    get_overview_meta_dir,
+    load_overview_meta,
     load_setting_float,
     load_setting_int,
 )
@@ -89,8 +90,8 @@ class AdvancedDemoParser:
         self.map_bounds_file = get_bounds_path()
         self.overview_dir = get_overview_dir()
         self.overview_checked = False
-        self.boltobserv_bounds = {}
-        self.boltobserv_checked = False
+        self.overview_meta_bounds = {}
+        self.overview_meta_checked = False
 
         # Metrics
         self.last_parse_time = 0.0
@@ -232,15 +233,15 @@ class AdvancedDemoParser:
         }
         self.fixed_world_bounds = True
 
-    def _load_boltobserv_bounds(self) -> None:
-        if self.boltobserv_checked:
+    def _load_overview_meta_bounds(self) -> None:
+        if self.overview_meta_checked:
             return
-        self.boltobserv_checked = True
-        base_dir = Path("maps/boltobserv")
-        self.boltobserv_bounds = load_boltobserv_meta(base_dir)
+        self.overview_meta_checked = True
+        base_dir = get_overview_meta_dir()
+        self.overview_meta_bounds = load_overview_meta(base_dir)
         if not self.map_name:
             return
-        bounds = self.boltobserv_bounds.get(self.map_name)
+        bounds = self.overview_meta_bounds.get(self.map_name)
         if not bounds:
             return
         if not self.fixed_world_bounds:
@@ -323,7 +324,7 @@ class AdvancedDemoParser:
             self.map_config = MAP_DEFINITIONS.get(self.map_name)
         self._load_fixed_bounds()
         if not self.fixed_world_bounds:
-            self._load_boltobserv_bounds()
+            self._load_overview_meta_bounds()
         if not self.fixed_world_bounds:
             self._load_overview_bounds()
 
@@ -341,6 +342,14 @@ class AdvancedDemoParser:
                 "life_state",
                 "has_helmet",
                 "balance",
+                "m_bHasDefuser",
+                "has_defuser",
+                "m_bIsScoped",
+                "m_bIsDefusing",
+                "m_bIsPlanting",
+                "m_iKills",
+                "m_iDeaths",
+                "m_iAssists",
             ]
             filtered = [prop for prop in wanted if prop in available]
             self.available_props = filtered or wanted
@@ -406,6 +415,9 @@ class AdvancedDemoParser:
                 "planted": bomb_planted,
                 "position": bomb_position,
                 "planter": bomb_planter,
+                "blow_time_sec": None,
+                "defuse_time_sec": None,
+                "is_defusing": False,
             },
             "tick": latest_tick,
             "data_source": "demoparser2",
@@ -512,7 +524,13 @@ class AdvancedDemoParser:
             df = self.demo_parser.parse_ticks(self.available_props, ticks=tick_range)
         if df.empty or "tick" not in df.columns:
             return None
-        latest_tick = int(df["tick"].max())
+        try:
+            tick_max = df["tick"].max()
+            if tick_max != tick_max:  # NaN
+                return None
+            latest_tick = int(tick_max)
+        except (ValueError, TypeError):
+            return None
         latest_df = df[df["tick"] == latest_tick]
         if latest_df.empty:
             return None

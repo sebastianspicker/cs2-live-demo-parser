@@ -31,10 +31,10 @@
 - `config.json` - Default settings (poll interval, parser limits, UI defaults).
 - `maps/map_definitions.json` - Optional local map metadata (gitignored).
 - `maps/world_bounds.json` - Optional local world bounds (gitignored).
-- `maps/boltobserv/` - Optional upstream metadata (GPL-3.0, local-only).
+- `maps/overviews/` - Optional overview images and metadata, e.g. `de_*/meta.json5` (local-only; check license if using third-party assets).
 
 ## Tests
-- `tests/test_config.py` - Config parsing, JSON5 strip, boltobserv parsing.
+- `tests/test_config.py` - Config parsing, JSON5 strip, optional map meta parsing.
 - `tests/test_ws_server.py` - Demo path validation, header validation, ordering, msgpack size handling.
 - `tests/test_client_smoke.py` - Client HTML/JS sanity checks.
 

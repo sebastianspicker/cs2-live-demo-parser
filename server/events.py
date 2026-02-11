@@ -131,7 +131,12 @@ class EventCollector:
             if events_df.empty:
                 return None
         if "tick" in events_df.columns and not events_df.empty:
-            setattr(self, last_tick_attr, int(events_df["tick"].max()))
+            try:
+                tick_max = events_df["tick"].max()
+                if tick_max == tick_max:  # reject NaN
+                    setattr(self, last_tick_attr, int(tick_max))
+            except (ValueError, TypeError):
+                pass
         return events_df
 
     def _winner_team(self, row: Dict[str, Any]) -> Optional[str]:
