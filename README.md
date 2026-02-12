@@ -73,6 +73,16 @@ ruff format .
 pytest -q
 ```
 
+## Validation (build / run / test)
+From repo root:
+
+- **Install:** `python -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt -r requirements-dev.txt`
+- **Run:** `python server/main.py` (then open `client/index.html`)
+- **Test:** `ruff format --check . && ruff check . && pytest -q`
+- **Full local CI:** `./scripts/ci-local.sh` (optional: `RUN_PIP_AUDIT=1` or `RUN_GITLEAKS=1`)
+
+See `ARCHIVE.md` for the full list of validation commands and archive rationale.
+
 ## Security
 - Default bind host is `127.0.0.1`. To expose externally, set `--bind-host 0.0.0.0` (or `bind_host` in `config.json`) and consider network-level protections.
 - CI includes secret scanning (gitleaks), SAST (CodeQL), and dependency scanning (pip-audit).
@@ -101,6 +111,9 @@ UI controls:
 - `docs/PARSER_DOCUMENTATION.md`
 - `docs/SECURITY_AND_ANTICHEAT_FAQ.md`
 - `docs/VALVE_NOTICE.md` (incremental demo reading risks and latency)
+- `docs/RUNBOOK.md` (setup, run, lint, test, troubleshooting)
+- `docs/issue-audit/` (read-only code audit template; see `docs/issue-audit/README.md`)
+- `ARCHIVE.md` (archive notice, keep/remove/move list, validation commands)
 - `SECURITY.md` (security reporting guidance)
 - `CONTRIBUTING.md` (development + contribution notes)
 
@@ -111,6 +124,7 @@ UI controls:
 ├── server/                 Python WebSocket server
 ├── demos/                  Demo files (.dem)
 ├── docs/                   Public documentation
+├── scripts/                CI local reproduction (ci-local.sh)
 └── tests/                  Pytest suite
 ```
 
