@@ -47,6 +47,7 @@ class ProfessionalBroadcastServer:
         self.status_payload = {"type": "status", "message": "", "level": "info", "expires_in": 0}
 
         # Server state
+        self.state_lock = threading.Lock()
         self.clients = set()
         self.client_count = 0
         self.is_running = True
@@ -89,6 +90,12 @@ class ProfessionalBroadcastServer:
             "CS2_MSGPACK_REFRESH_INTERVAL",
             10,
         )
+        self.bind_port = load_setting_int(
+            "server",
+            "bind_port",
+            "CS2_WS_PORT",
+            8765,
+        )
         self.loop = None
 
         if self.parser_executor == "thread":
@@ -130,15 +137,21 @@ class ProfessionalBroadcastServer:
         parser_thread = threading.Thread(target=self._parser_loop, daemon=True)
         parser_thread.start()
 
-        print("✅ Starting WebSocket server...")
-        async with websockets.serve(self.handle_client, self.bind_host, 8765, ping_interval=20):
-            print(f"🎮 Server listening on ws://{self.bind_host}:8765")
-            print("📡 Waiting for broadcaster clients...\n")
-            await asyncio.Future()
+        print(f"✅ Starting WebSocket server on {self.bind_host}:{self.bind_port}...")
+        try:
+            async with websockets.serve(self.handle_client, self.bind_host, self.bind_port, ping_interval=20):
+                print(f"🎮 Server listening on ws://{self.bind_host}:{self.bind_port}")
+                print("📡 Waiting for broadcaster clients...\n")
+                await asyncio.Future()
+        except OSError as exc:
+            print(f"❌ Could not start server: {exc}")
+            self.is_running = False
+            return
 
     async def handle_client(self, websocket, path):
-        self.clients.add(websocket)
-        self.client_count = len(self.clients)
+        with self.state_lock:
+            self.clients.add(websocket)
+            self.client_count = len(self.clients)
         client_id = id(websocket)
         last_status_version = 0
         last_demo_list_version = 0
@@ -215,8 +228,9 @@ class ProfessionalBroadcastServer:
         finally:
             if receiver_task:
                 receiver_task.cancel()
-            self.clients.discard(websocket)
-            self.client_count = len(self.clients)
+            with self.state_lock:
+                self.clients.discard(websocket)
+                self.client_count = len(self.clients)
             print(f"❌ Client disconnected (ID: {client_id}). Total: {self.client_count}")
 
     async def _send_update(self, websocket, update):
@@ -268,7 +282,7 @@ class ProfessionalBroadcastServer:
         json_size = len(json.dumps(payload))
         binary_payload = msgpack.packb(payload)
         size = len(binary_payload)
-        compression_rate = (1 - size / json_size) * 100
+        compression_rate = (1 - size / json_size) * 100 if json_size > 0 else 0.0
         self.pack_count += 1
         interval = max(1, int(self.msgpack_refresh_interval or 1))
         should_refresh = self.pack_count % interval == 0
@@ -277,7 +291,7 @@ class ProfessionalBroadcastServer:
             payload["_compression_rate"] = round(compression_rate, 1)
             binary_payload = msgpack.packb(payload)
             size = len(binary_payload)
-            compression_rate = (1 - size / json_size) * 100
+            compression_rate = (1 - size / json_size) * 100 if json_size > 0 else 0.0
         self.last_msg_bytes = size
         self.last_compression_rate = compression_rate
         return binary_payload, json_size, len(binary_payload), payload
@@ -305,16 +319,19 @@ class ProfessionalBroadcastServer:
                 self._set_map_override(data.get("map"))
             elif msg_type == "request_demos":
                 demo_list, _ = self._get_demo_list_snapshot()
-                await websocket.send(
-                    json.dumps(
-                        {
-                            "type": "demo_list",
-                            "demos": demo_list,
-                            "mode": self.parse_mode,
-                            "selected_demo": self.selected_demo,
-                        }
+                try:
+                    await websocket.send(
+                        json.dumps(
+                            {
+                                "type": "demo_list",
+                                "demos": demo_list,
+                                "mode": self.parse_mode,
+                                "selected_demo": self.selected_demo,
+                            }
+                        )
                     )
-                )
+                except Exception:
+                    pass
 
     def _parser_loop(self):
         print("🔄 Parser thread started (Phase 1 async)\n")
@@ -434,6 +451,9 @@ class ProfessionalBroadcastServer:
 
     def _resolve_demo_path(self, name: str) -> Optional[Path]:
         if not name:
+            return None
+        # Explicitly block directory traversal attempts
+        if "/" in name or "\\" in name or ".." in name:
             return None
         demo_dir = self.demo_dir.resolve()
         candidate = (self.demo_dir / name).resolve()
@@ -592,20 +612,23 @@ class ProfessionalBroadcastServer:
             self.status_version += 1
 
     def _broadcast_state_update(self) -> None:
-        if not self.clients:
-            return
-        payload = json.dumps(
-            {
-                "type": "state",
-                "mode": self.parse_mode,
-                "selected_demo": self.selected_demo,
-                "map_override": self.map_override,
-                "demo_valid": self.demo_valid,
-                "demo_loading": self.demo_loading,
-                "bounds_safe": self.bounds_safe,
-            }
-        )
-        for client in list(self.clients):
+        with self.state_lock:
+            if not self.clients:
+                return
+            payload = json.dumps(
+                {
+                    "type": "state",
+                    "mode": self.parse_mode,
+                    "selected_demo": self.selected_demo,
+                    "map_override": self.map_override,
+                    "demo_valid": self.demo_valid,
+                    "demo_loading": self.demo_loading,
+                    "bounds_safe": self.bounds_safe,
+                }
+            )
+            clients_snapshot = list(self.clients)
+
+        for client in clients_snapshot:
             try:
                 asyncio.run_coroutine_threadsafe(client.send(payload), self.loop)
             except Exception:
