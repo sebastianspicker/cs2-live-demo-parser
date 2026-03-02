@@ -63,3 +63,12 @@ def test_load_setting_str_prefers_env(monkeypatch):
     monkeypatch.setenv("CS2_BIND_HOST", "0.0.0.0")
     value = config.load_setting_str("server", "bind_host", "CS2_BIND_HOST", "127.0.0.1")
     assert value == "0.0.0.0"
+
+
+def test_is_loopback_host_variants():
+    assert config.is_loopback_host("127.0.0.1")
+    assert config.is_loopback_host("::1")
+    assert config.is_loopback_host("[::1]")
+    assert config.is_loopback_host("localhost")
+    assert not config.is_loopback_host("0.0.0.0")
+    assert not config.is_loopback_host("192.168.1.20")

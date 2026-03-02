@@ -1,16 +1,34 @@
 import json
+import logging
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+LOGGER = logging.getLogger(__name__)
 
 
 def make_metrics_handler(server_ref):
     class MetricsHandler(BaseHTTPRequestHandler):
         def do_GET(self):
-            if self.path != "/metrics":
+            path = self.path.split("?")[0] if self.path else ""
+            if path == "/health":
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"status":"ok"}')
+                return
+            if path != "/metrics":
                 self.send_response(404)
                 self.end_headers()
                 return
-            payload = json.dumps(server_ref.get_metrics()).encode("utf-8")
+            try:
+                payload = json.dumps(server_ref.get_metrics()).encode("utf-8")
+            except Exception as exc:
+                LOGGER.error("Failed to serialize metrics payload: %s", exc)
+                self.send_response(500)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"error":"internal_error"}')
+                return
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(payload)))

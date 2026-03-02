@@ -161,10 +161,16 @@ class AdvancedDemoParser:
             }
         z_range = entry.get("z_range")
         if isinstance(z_range, dict) and "min" in z_range and "max" in z_range:
+            z_min = None
+            z_max = None
             try:
-                self.world_z_range = {"min": float(z_range["min"]), "max": float(z_range["max"])}
-            except Exception:
-                pass
+                z_min = float(z_range["min"])
+                z_max = float(z_range["max"])
+            except (TypeError, ValueError):
+                z_min = None
+                z_max = None
+            if z_min is not None and z_max is not None:
+                self.world_z_range = {"min": z_min, "max": z_max}
         self.fixed_world_bounds = True
 
     def _load_overview_bounds(self) -> None:
@@ -212,7 +218,7 @@ class AdvancedDemoParser:
             if match:
                 try:
                     return float(match.group(1))
-                except Exception:
+                except (TypeError, ValueError):
                     return None
             return None
 
@@ -255,13 +261,16 @@ class AdvancedDemoParser:
         if self.world_z_range is None and isinstance(bounds, dict):
             z_range = bounds.get("z_range")
             if isinstance(z_range, dict) and "min" in z_range and "max" in z_range:
+                z_min = None
+                z_max = None
                 try:
-                    self.world_z_range = {
-                        "min": float(z_range["min"]),
-                        "max": float(z_range["max"]),
-                    }
-                except Exception:
-                    pass
+                    z_min = float(z_range["min"])
+                    z_max = float(z_range["max"])
+                except (TypeError, ValueError):
+                    z_min = None
+                    z_max = None
+                if z_min is not None and z_max is not None:
+                    self.world_z_range = {"min": z_min, "max": z_max}
 
     def _ensure_parser(self) -> None:
         if self.demo_parser is None:
@@ -279,10 +288,13 @@ class AdvancedDemoParser:
             steamid = row.get("steamid") or row.get("steamid64") or row.get("xuid")
             name = row.get("name") or row.get("player_name")
             if steamid is not None and name:
+                parsed_steamid = None
                 try:
-                    self.player_info[int(steamid)] = str(name)
-                except Exception:
-                    continue
+                    parsed_steamid = int(steamid)
+                except (TypeError, ValueError):
+                    parsed_steamid = None
+                if parsed_steamid is not None:
+                    self.player_info[parsed_steamid] = str(name)
 
     def _refresh_events(self, max_tick: Optional[int] = None):
         if not self.events_dirty:

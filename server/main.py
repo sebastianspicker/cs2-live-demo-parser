@@ -7,7 +7,7 @@ import argparse
 import asyncio
 from pathlib import Path
 
-from config import load_app_config, load_setting_str
+from config import is_loopback_host, load_app_config, load_setting_int, load_setting_str
 from metrics import start_metrics_server
 from ws_server import ProfessionalBroadcastServer
 
@@ -48,10 +48,16 @@ def parse_args():
     if parser_exec_default not in ("none", "thread", "process"):
         parser_exec_default = "none"
 
+    demo_dir_default = server_config.get("demo_dir", repo_root / "demos")
+    if demo_dir_default is None or (
+        isinstance(demo_dir_default, str) and not demo_dir_default.strip()
+    ):
+        demo_dir_default = repo_root / "demos"
+    elif not isinstance(demo_dir_default, (str, Path)):
+        demo_dir_default = repo_root / "demos"
+
     parser = argparse.ArgumentParser(description="CS2 Esports Broadcaster")
-    parser.add_argument(
-        "--demo-dir", default=str(server_config.get("demo_dir", repo_root / "demos"))
-    )
+    parser.add_argument("--demo-dir", default=str(demo_dir_default))
     parser.add_argument("--poll-interval", type=float, default=poll_default)
     parser.add_argument("--no-msgpack", action="store_true")
     parser.add_argument(
@@ -67,6 +73,15 @@ def parse_args():
 
 async def main():
     args = parse_args()
+    allow_public_metrics = (
+        load_setting_int(
+            "server",
+            "allow_public_metrics",
+            "CS2_ALLOW_PUBLIC_METRICS",
+            0,
+        )
+        == 1
+    )
 
     demo_dir = Path(args.demo_dir)
     demo_dir.mkdir(exist_ok=True)
@@ -83,6 +98,12 @@ async def main():
     )
 
     if args.metrics_port > 0:
+        if not allow_public_metrics and not is_loopback_host(args.metrics_host):
+            print(
+                "🔒 Security hardening: metrics host is non-loopback while "
+                "public metrics are not explicitly allowed. Falling back to 127.0.0.1."
+            )
+            args.metrics_host = "127.0.0.1"
         start_metrics_server(server, args.metrics_port, args.metrics_host)
         print(f"📈 Metrics available at http://{args.metrics_host}:{args.metrics_port}/metrics")
 

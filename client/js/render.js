@@ -20,7 +20,8 @@ export function updateTrails(client, state) {
     });
 }
 
-function _playerKey(p) {
+export function _playerKey(p) {
+    if (p == null || typeof p !== "object") return String(p ?? "");
     return `${p.id ?? ""}_${p.name ?? ""}`;
 }
 
@@ -35,7 +36,10 @@ export function getInterpolatedPlayers(client) {
         return client.currentState.players;
     }
     const now = Date.now();
-    const alpha = Math.min(1, (now - client.lastUpdateReceived) / client.smoothIntervalMs);
+    const intervalMs = Number(client.smoothIntervalMs);
+    const denom = intervalMs > 0 ? intervalMs : 1;
+    const rawAlpha = (now - (client.lastUpdateReceived || 0)) / denom;
+    const alpha = Math.min(1, Math.max(0, Number.isFinite(rawAlpha) ? rawAlpha : 1));
     const lastByKey = new Map();
     client.lastState.players.forEach(player => {
         lastByKey.set(_playerKey(player), player);
@@ -150,6 +154,10 @@ export function renderRadar(client) {
         client.ctx.fill();
     });
 
+    // Extract settings early to avoid ReferenceError in trail rendering
+    const settings = client.radarSettings || {};
+    const mapTeamFilter = settings.mapTeamFilter === "t" || settings.mapTeamFilter === "ct" ? settings.mapTeamFilter : "all";
+
     if (client.showTrails) {
         client.trails.forEach((trailEntry) => {
             if (mapTeamFilter !== "all" && (mapTeamFilter === "t" ? trailEntry.team !== "T" : trailEntry.team !== "CT")) return;
@@ -173,12 +181,10 @@ export function renderRadar(client) {
     }
 
     const zRange = client.mapConfig && client.mapConfig.z_range ? client.mapConfig.z_range : null;
-    const settings = client.radarSettings || {};
     const dotSizeMult = typeof settings.dotSize === "number" && Number.isFinite(settings.dotSize) ? settings.dotSize : 1;
     const showAllyNames = settings.showAllyNames !== false && !!settings.showAllyNames;
     const showEnemyNames = settings.showEnemyNames !== false;
     const showViewCones = !!settings.showViewCones;
-    const mapTeamFilter = settings.mapTeamFilter === "t" || settings.mapTeamFilter === "ct" ? settings.mapTeamFilter : "all";
     let players = getInterpolatedPlayers(client);
     if (mapTeamFilter !== "all") {
         players = players.filter(p => p.team === (mapTeamFilter === "t" ? "T" : "CT"));
@@ -288,7 +294,7 @@ export function renderRadar(client) {
             client.ctx.restore();
         }
 
-        const states = client.playerStates.get(player.name) || {};
+        const states = client.playerStates.get(_playerKey(player)) || {};
         if (player.is_alive) {
             if (states.flash && states.flash > now) {
                 client.ctx.strokeStyle = "rgba(255, 255, 255, 0.8)";

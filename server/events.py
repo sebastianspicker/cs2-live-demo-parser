@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import deque
 from typing import Any, Dict, List, Optional
 
 from state import build_kill_feed
@@ -9,7 +10,7 @@ class EventCollector:
     def __init__(self, demo_parser):
         self.demo_parser = demo_parser
         self.event_names: Dict[str, str] = {}
-        self.events_cache: List[Dict[str, Any]] = []
+        self.events_cache: deque = deque(maxlen=50)  # Auto-trim to 50 events
         self.kill_feed_cache: List[Dict[str, Any]] = []
 
         self.round_number = 0
@@ -36,7 +37,7 @@ class EventCollector:
         self.bomb_planter: Optional[str] = None
 
     def reset_state(self) -> None:
-        self.events_cache = []
+        self.events_cache = deque(maxlen=50)
         self.kill_feed_cache = []
         self.round_number = 0
         self.ct_score = 0
@@ -101,10 +102,13 @@ class EventCollector:
                 z = row.get(f"{prefix}Z")
             if x is None or y is None:
                 continue
+            parsed = None
             try:
-                return {"x": float(x), "y": float(y), "z": float(z or 0.0)}
-            except Exception:
-                continue
+                parsed = {"x": float(x), "y": float(y), "z": float(z or 0.0)}
+            except (TypeError, ValueError):
+                parsed = None
+            if parsed is not None:
+                return parsed
         return None
 
     def _event_player_name(self, row: Dict[str, Any], keys: List[str]) -> Optional[str]:
@@ -137,7 +141,7 @@ class EventCollector:
                     setattr(self, last_tick_attr, int(tick_max))
             except (ValueError, TypeError):
                 pass
-        return events_df
+        return events_df.copy()
 
     def _winner_team(self, row: Dict[str, Any]) -> Optional[str]:
         winner = row.get("winner") or row.get("winner_team") or row.get("winner_name")
@@ -185,10 +189,13 @@ class EventCollector:
                 return {names[0]: result}
         frames: Dict[str, Any] = {}
         for name in names:
+            parsed_frame = None
             try:
-                frames[name] = parser.parse_event(name, player=["X", "Y", "Z"])
-            except Exception:
-                continue
+                parsed_frame = parser.parse_event(name, player=["X", "Y", "Z"])
+            except (AttributeError, TypeError, ValueError, RuntimeError):
+                parsed_frame = None
+            if parsed_frame is not None:
+                frames[name] = parsed_frame
         return frames
 
     def refresh(self, max_tick: Optional[int] = None) -> None:
@@ -313,5 +320,4 @@ class EventCollector:
                     payload.update(position)
                 self.events_cache.append(payload)
 
-        if len(self.events_cache) > 20:
-            self.events_cache = self.events_cache[-20:]
+        # deque with maxlen handles trimming automatically

@@ -11,8 +11,6 @@ const DEFAULT_RADAR_SETTINGS = {
     showViewCones: false,
     mapTeamFilter: "all",
     showBombOnMap: true,
-    showKitsOnMap: true,
-    showWeaponsOnMap: true,
     viewRotation: 0,
 };
 
@@ -21,6 +19,7 @@ function loadRadarSettings() {
         const raw = localStorage.getItem(RADAR_SETTINGS_KEY);
         if (!raw) return { ...DEFAULT_RADAR_SETTINGS };
         const parsed = JSON.parse(raw);
+        if (parsed === null || typeof parsed !== "object") return { ...DEFAULT_RADAR_SETTINGS };
         const dotSize = typeof parsed.dotSize === "number" && Number.isFinite(parsed.dotSize)
             ? parsed.dotSize : DEFAULT_RADAR_SETTINGS.dotSize;
         const bombSize = typeof parsed.bombSize === "number" && Number.isFinite(parsed.bombSize)
@@ -36,8 +35,6 @@ function loadRadarSettings() {
             showViewCones: !!parsed.showViewCones,
             mapTeamFilter,
             showBombOnMap: parsed.showBombOnMap !== false,
-            showKitsOnMap: parsed.showKitsOnMap !== false,
-            showWeaponsOnMap: parsed.showWeaponsOnMap !== false,
             viewRotation: [0, 90, 180, 270].includes(Number(parsed.viewRotation)) ? Number(parsed.viewRotation) : 0,
         };
     } catch {
@@ -220,6 +217,9 @@ class CS2BroadcasterClient {
         this.deadLastPosition = new Map();
         this.layoutMode = this.loadLayoutMode();
         this.ui.setPlaybackEnabled(this.mode === "manual");
+        this.reconnectBackoffMs = 2000;
+        this.maxReconnectBackoffMs = 30000;
+        this.playbackPlaying = false;
 
         const urlParams = new URLSearchParams(window.location.search);
         this.miniRadarMode = urlParams.get("mini") === "1" || urlParams.get("layout") === "mini";
@@ -249,6 +249,7 @@ class CS2BroadcasterClient {
 
         this.ws.onopen = () => {
             this.connected = true;
+            this.reconnectBackoffMs = 2000;
             this.ui.updateConnectionStatus(true);
             console.log("✅ Connected to broadcaster");
         };
@@ -266,13 +267,41 @@ class CS2BroadcasterClient {
             this.ui.updateConnectionStatus(false);
             console.log("❌ Disconnected from broadcaster");
 
-            setTimeout(() => this.connect(), 3000);
+            const delay = this.reconnectBackoffMs;
+            this.reconnectBackoffMs = Math.min(
+                this.reconnectBackoffMs * 2,
+                this.maxReconnectBackoffMs
+            );
+            setTimeout(() => this.connect(), delay);
         };
     }
 
     sendMessage(payload) {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
         this.ws.send(JSON.stringify(payload));
+    }
+
+    applyStateFromMessage(message) {
+        if (message.mode === "live" || message.mode === "manual") {
+            this.mode = message.mode;
+            this.ui.updateModeUI(this.mode);
+        }
+        if (typeof message.selected_demo !== "undefined") {
+            this.selectedDemo = message.selected_demo || "";
+            const demoSelect = this.ui.getElement("demoSelector");
+            if (demoSelect) demoSelect.value = this.selectedDemo;
+        }
+        if (typeof message.map_override === "string") {
+            this.mapOverride = message.map_override || "auto";
+            const mapSelector = this.ui.getElement("mapSelector");
+            if (mapSelector) mapSelector.value = this.mapOverride;
+        }
+        if (typeof message.demo_valid === "boolean") this.demoValid = message.demo_valid;
+        if (typeof message.demo_loading === "boolean") this.demoLoading = message.demo_loading;
+        if (typeof message.bounds_safe === "boolean") this.boundsSafe = message.bounds_safe;
+        this.ui.setPlaybackEnabled(this.mode === "manual" && !!this.selectedDemo);
+        this.updateMapOverrideUI();
+        this.updateDemoStatusUI();
     }
 
     async handleMessage(data) {
@@ -293,29 +322,14 @@ class CS2BroadcasterClient {
                 message = JSON.parse(data);
             }
 
+            if (!message || typeof message !== "object") {
+                return;
+            }
             if (message.type === "position_update") {
                 this.handlePositionUpdate(message);
             } else if (message.type === "connection") {
                 console.log("✅ Connected:", message.message);
-                if (message.mode) {
-                    this.mode = message.mode;
-                    this.ui.updateModeUI(this.mode);
-                }
-                if (typeof message.map_override === "string") {
-                    this.mapOverride = message.map_override || "auto";
-                    this.updateMapOverrideUI();
-                }
-                if (typeof message.demo_valid === "boolean") {
-                    this.demoValid = message.demo_valid;
-                    this.updateDemoStatusUI();
-                }
-                if (typeof message.demo_loading === "boolean") {
-                    this.demoLoading = message.demo_loading;
-                    this.updateDemoStatusUI();
-                }
-                if (typeof message.bounds_safe === "boolean") {
-                    this.boundsSafe = message.bounds_safe;
-                }
+                this.applyStateFromMessage(message);
                 if (typeof message.msgpack_refresh_interval === "number") {
                     this.msgpackRefreshInterval = message.msgpack_refresh_interval;
                     this.updateSamplingUI();
@@ -323,60 +337,13 @@ class CS2BroadcasterClient {
                 if (Array.isArray(message.demos)) {
                     this.ui.updateDemoList(message.demos);
                 }
-                this.selectedDemo = message.selected_demo || "";
-                const demoSelect = this.ui.getElement("demoSelector");
-                if (demoSelect) demoSelect.value = this.selectedDemo;
-                this.ui.setPlaybackEnabled(this.mode === "manual" && !!this.selectedDemo);
-                const mapSelector = this.ui.getElement("mapSelector");
-                if (mapSelector) mapSelector.value = this.mapOverride;
-                this.updateMapOverrideUI();
-                this.updateDemoStatusUI();
             } else if (message.type === "demo_list") {
+                this.applyStateFromMessage(message);
                 if (Array.isArray(message.demos)) {
                     this.ui.updateDemoList(message.demos);
                 }
-                if (message.mode) {
-                    this.mode = message.mode;
-                    this.ui.updateModeUI(this.mode);
-                }
-                if (typeof message.selected_demo !== "undefined") {
-                    this.selectedDemo = message.selected_demo || "";
-                    const demoSelect = this.ui.getElement("demoSelector");
-                    if (demoSelect) demoSelect.value = this.selectedDemo;
-                }
-                if (typeof message.bounds_safe === "boolean") {
-                    this.boundsSafe = message.bounds_safe;
-                }
-                this.ui.setPlaybackEnabled(this.mode === "manual" && !!this.selectedDemo);
-                this.updateMapOverrideUI();
-                this.updateDemoStatusUI();
             } else if (message.type === "state") {
-                if (message.mode) {
-                    this.mode = message.mode;
-                    this.ui.updateModeUI(this.mode);
-                }
-                if (typeof message.selected_demo !== "undefined") {
-                    this.selectedDemo = message.selected_demo || "";
-                    const demoSelect = this.ui.getElement("demoSelector");
-                    if (demoSelect) demoSelect.value = this.selectedDemo;
-                }
-                if (typeof message.map_override === "string") {
-                    this.mapOverride = message.map_override || "auto";
-                    const mapSelector = this.ui.getElement("mapSelector");
-                    if (mapSelector) mapSelector.value = this.mapOverride;
-                }
-                if (typeof message.demo_valid === "boolean") {
-                    this.demoValid = message.demo_valid;
-                }
-                if (typeof message.demo_loading === "boolean") {
-                    this.demoLoading = message.demo_loading;
-                }
-                if (typeof message.bounds_safe === "boolean") {
-                    this.boundsSafe = message.bounds_safe;
-                }
-                this.ui.setPlaybackEnabled(this.mode === "manual" && !!this.selectedDemo);
-                this.updateMapOverrideUI();
-                this.updateDemoStatusUI();
+                this.applyStateFromMessage(message);
             } else if (message.type === "status") {
                 const text = typeof message.message === "string" ? message.message : "";
                 this.statusMessage = text;
@@ -441,7 +408,7 @@ class CS2BroadcasterClient {
             this.lastDemoTimeSample = this.demoTime;
             this.lastServerTsSample = serverTs;
         }
-        processEvents(this, message.data.events || []);
+        processEvents(this, message.data?.events || []);
         this.updateUI();
         this.updateHistory.push({
             timestamp: Date.now(),
@@ -804,11 +771,13 @@ class CS2BroadcasterClient {
         const seek = this.ui.getElement("playbackSeek");
         if (playBtn) {
             playBtn.addEventListener("click", () => {
+                this.playbackPlaying = true;
                 this.sendMessage({ type: "playback", action: "play" });
             });
         }
         if (pauseBtn) {
             pauseBtn.addEventListener("click", () => {
+                this.playbackPlaying = false;
                 this.sendMessage({ type: "playback", action: "pause" });
             });
         }
@@ -844,6 +813,23 @@ class CS2BroadcasterClient {
                 this.localStatusExpiresAt = 0;
             });
         }
+        document.addEventListener("keydown", (e) => {
+            const tag = e.target && e.target.tagName ? e.target.tagName.toUpperCase() : "";
+            if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
+            if (this.mode !== "manual") return;
+            if (e.code === "Space") {
+                e.preventDefault();
+                const nextPlaying = !this.playbackPlaying;
+                this.sendMessage({ type: "playback", action: nextPlaying ? "play" : "pause" });
+                this.playbackPlaying = nextPlaying;
+            } else if (e.code === "ArrowLeft") {
+                e.preventDefault();
+                this.sendSeek(Math.max(0, this.demoTime - 5));
+            } else if (e.code === "ArrowRight") {
+                e.preventDefault();
+                this.sendSeek(this.demoTime + 5);
+            }
+        });
         this.setupRadarSettingsListeners();
     }
 
@@ -894,8 +880,10 @@ class CS2BroadcasterClient {
     }
 
     loadMapImage(mapName) {
-        if (!mapName) return;
-        const key = mapName.toLowerCase();
+        if (!mapName || typeof mapName !== "string") return;
+        // Sanitize for path safety: only alphanumeric, underscore, hyphen (no path traversal)
+        const key = mapName.toLowerCase().replace(/[^a-z0-9_-]/g, "") || null;
+        if (!key) return;
         if (this.mapImages.has(key)) {
             const cached = this.mapImages.get(key);
             if (cached) {
@@ -1064,8 +1052,6 @@ class CS2BroadcasterClient {
         const coneEl = document.getElementById("settingShowViewCones");
         const mapTeamEl = document.getElementById("settingMapTeamFilter");
         const bombOnMapEl = document.getElementById("settingShowBombOnMap");
-        const kitsOnMapEl = document.getElementById("settingShowKitsOnMap");
-        const weaponsOnMapEl = document.getElementById("settingShowWeaponsOnMap");
         if (dotEl) { dotEl.value = String(dotSize); }
         if (dotVal) dotVal.textContent = String(dotSize);
         if (bombEl) { bombEl.value = String(bombSize); }
@@ -1077,8 +1063,6 @@ class CS2BroadcasterClient {
         if (viewRotationEl) viewRotationEl.value = String(s.viewRotation ?? 0);
         if (mapTeamEl) mapTeamEl.value = s.mapTeamFilter || "all";
         if (bombOnMapEl) bombOnMapEl.checked = s.showBombOnMap !== false;
-        if (kitsOnMapEl) kitsOnMapEl.checked = s.showKitsOnMap !== false;
-        if (weaponsOnMapEl) weaponsOnMapEl.checked = s.showWeaponsOnMap !== false;
     }
 
     setupRadarSettingsListeners() {
@@ -1169,18 +1153,6 @@ class CS2BroadcasterClient {
         if (bombOnMapEl) {
             bombOnMapEl.addEventListener("change", () => {
                 updateSetting("showBombOnMap", bombOnMapEl.checked);
-            });
-        }
-        const kitsOnMapEl = document.getElementById("settingShowKitsOnMap");
-        if (kitsOnMapEl) {
-            kitsOnMapEl.addEventListener("change", () => {
-                updateSetting("showKitsOnMap", kitsOnMapEl.checked);
-            });
-        }
-        const weaponsOnMapEl = document.getElementById("settingShowWeaponsOnMap");
-        if (weaponsOnMapEl) {
-            weaponsOnMapEl.addEventListener("change", () => {
-                updateSetting("showWeaponsOnMap", weaponsOnMapEl.checked);
             });
         }
     }

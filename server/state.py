@@ -17,7 +17,7 @@ def _get_team_num(row: Dict[str, Any]) -> Optional[int]:
         return None
     try:
         return int(raw)
-    except Exception:
+    except (TypeError, ValueError):
         return None
 
 
@@ -85,7 +85,7 @@ def build_players(
         steamid = row.get("steamid") or row.get("steamid64") or row.get("player")
         try:
             steamid_int = int(steamid) if steamid is not None else None
-        except Exception:
+        except (TypeError, ValueError):
             steamid_int = None
         name = player_info.get(steamid_int) if steamid_int is not None else None
         if not name:
@@ -98,7 +98,7 @@ def build_players(
         health = row.get("health") or 0
         try:
             health_int = int(health)
-        except Exception:
+        except (TypeError, ValueError):
             health_int = 0
         if life_state is None:
             is_alive = health_int > 0
@@ -110,14 +110,14 @@ def build_players(
         armor = row.get("armor_value") or 0
         try:
             armor_int = int(armor)
-        except Exception:
+        except (TypeError, ValueError):
             armor_int = 0
         helmet = bool(row.get("has_helmet") or False)
         has_defuser = bool(row.get("m_bHasDefuser") or row.get("has_defuser") or False)
         money = row.get("balance")
         try:
             money_value = int(money) if money is not None else 0
-        except Exception:
+        except (TypeError, ValueError):
             money_value = 0
 
         kills = _get_value(row, ["m_iKills", "kills"])
@@ -165,9 +165,7 @@ def build_players(
         if not fixed_bounds:
             update_world_bounds(world_bounds, x, y)
 
-        if not is_alive and health_int <= 0:
-            continue
-
+        # Include dead players so the client can set deadLastPosition and draw death markers
         if is_alive:
             if team == "CT":
                 alive_ct += 1
@@ -243,9 +241,12 @@ def compute_economy(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
         account = row.get("balance")
         if account is None:
             continue
+        account_value = None
         try:
             account_value = int(account)
-        except Exception:
+        except (TypeError, ValueError):
+            account_value = None
+        if account_value is None:
             continue
         if team_num == 3:
             ct_total += account_value
@@ -271,5 +272,5 @@ def compute_elapsed_seconds(header: Optional[Dict[str, Any]], tick: int) -> floa
         if tick_rate <= 0:
             return 0.0
         return tick / tick_rate
-    except Exception:
+    except (TypeError, ValueError, ZeroDivisionError):
         return 0.0

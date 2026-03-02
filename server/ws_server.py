@@ -1,5 +1,6 @@
 import asyncio
 import json
+import secrets
 import threading
 import time
 from collections import deque
@@ -8,12 +9,24 @@ from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 import queue
 from typing import Optional
+from urllib.parse import parse_qs, urlparse
 
 import msgpack
 
-from config import MAP_DEFINITIONS, load_setting_int, load_setting_float
+from config import (
+    MAP_DEFINITIONS,
+    is_loopback_host,
+    load_setting_float,
+    load_setting_int,
+    load_setting_str,
+)
 from demo_parser import AdvancedDemoParser
 from worker import start_worker
+
+
+def _generate_api_key() -> str:
+    """Generate a secure random API key."""
+    return secrets.token_hex(16)
 
 
 class ProfessionalBroadcastServer:
@@ -45,6 +58,37 @@ class ProfessionalBroadcastServer:
         self.status_lock = threading.Lock()
         self.status_version = 0
         self.status_payload = {"type": "status", "message": "", "level": "info", "expires_in": 0}
+
+        # Authentication
+        self.api_key = load_setting_str("server", "api_key", "CS2_API_KEY", "")
+        self.require_auth = load_setting_int("server", "require_auth", "CS2_REQUIRE_AUTH", 0) == 1
+        self.allow_insecure_public_bind = (
+            load_setting_int(
+                "server",
+                "allow_insecure_public_bind",
+                "CS2_ALLOW_INSECURE_PUBLIC_BIND",
+                0,
+            )
+            == 1
+        )
+        if not self.require_auth and not is_loopback_host(self.bind_host):
+            if self.allow_insecure_public_bind:
+                print(
+                    "⚠️ Insecure public bind allowed without auth "
+                    "(CS2_ALLOW_INSECURE_PUBLIC_BIND=1)."
+                )
+            else:
+                print(
+                    "🔐 Security hardening: non-loopback bind detected; "
+                    "enabling authentication automatically."
+                )
+                self.require_auth = True
+        # If auth is required but no key is configured, generate one
+        if self.require_auth and not self.api_key:
+            self.api_key = _generate_api_key()
+            print(f"🔐 Generated API key: {self.api_key}")
+        elif self.api_key and not self.require_auth:
+            print("🔐 API key configured but auth not required (set CS2_REQUIRE_AUTH=1 to enable)")
 
         # Server state
         self.state_lock = threading.Lock()
@@ -139,20 +183,57 @@ class ProfessionalBroadcastServer:
 
         print(f"✅ Starting WebSocket server on {self.bind_host}:{self.bind_port}...")
         try:
-            async with websockets.serve(self.handle_client, self.bind_host, self.bind_port, ping_interval=20):
+            async with websockets.serve(
+                self.handle_client, self.bind_host, self.bind_port, ping_interval=20
+            ):
                 print(f"🎮 Server listening on ws://{self.bind_host}:{self.bind_port}")
-                print("📡 Waiting for broadcaster clients...\n")
+                if self.require_auth:
+                    print("🔐 Authentication required (API key in ?key= query parameter)")
+                print("⏳ Waiting for broadcaster clients...\n")
                 await asyncio.Future()
         except OSError as exc:
             print(f"❌ Could not start server: {exc}")
             self.is_running = False
             return
 
+    def _validate_auth(self, websocket, path: str) -> bool:
+        """Validate client authentication. Returns True if auth is valid or not required."""
+        if not self.require_auth:
+            return True
+        # Check for API key in query string
+        parsed = urlparse(path if path.startswith("ws") else f"ws://localhost{path}")
+        query_params = parse_qs(parsed.query)
+        provided_key = query_params.get("key", [None])[0]
+        if provided_key and secrets.compare_digest(provided_key, self.api_key):
+            return True
+        # Also check for Authorization header (for clients that support it)
+        # Note: websocket.request_headers may be available depending on the library version
+        try:
+            auth_header = getattr(websocket, "request_headers", {}).get("Authorization", "")
+            if auth_header.startswith("Bearer "):
+                token = auth_header[7:]
+                if secrets.compare_digest(token, self.api_key):
+                    return True
+        except Exception:
+            return False
+        return False
+
     async def handle_client(self, websocket, path):
+        client_id = id(websocket)
+
+        # Authentication check
+        if not self._validate_auth(websocket, path):
+            print(f"❌ Unauthorized connection attempt (ID: {client_id})")
+            try:
+                await websocket.send(json.dumps({"type": "error", "message": "Unauthorized"}))
+            except Exception as exc:
+                print(f"⚠️ Could not send unauthorized message to client {client_id}: {exc}")
+            await websocket.close(code=4001, reason="Unauthorized")
+            return
+
         with self.state_lock:
             self.clients.add(websocket)
             self.client_count = len(self.clients)
-        client_id = id(websocket)
         last_status_version = 0
         last_demo_list_version = 0
         receiver_task = asyncio.create_task(self._client_receiver(websocket))
@@ -187,8 +268,9 @@ class ProfessionalBroadcastServer:
             for update in list(self.update_queue)[-10:]:
                 try:
                     await self._send_update(websocket, update)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    print(f"⚠️ Failed to send queued update to client {client_id}: {exc}")
+                    break
 
             while True:
                 try:
@@ -282,7 +364,10 @@ class ProfessionalBroadcastServer:
         json_size = len(json.dumps(payload))
         binary_payload = msgpack.packb(payload)
         size = len(binary_payload)
-        compression_rate = (1 - size / json_size) * 100 if json_size > 0 else 0.0
+        # Safe compression rate calculation with bounds checking
+        compression_rate = 0.0
+        if json_size > 0 and size >= 0:
+            compression_rate = max(0.0, min(100.0, (1 - size / json_size) * 100))
         self.pack_count += 1
         interval = max(1, int(self.msgpack_refresh_interval or 1))
         should_refresh = self.pack_count % interval == 0
@@ -291,32 +376,78 @@ class ProfessionalBroadcastServer:
             payload["_compression_rate"] = round(compression_rate, 1)
             binary_payload = msgpack.packb(payload)
             size = len(binary_payload)
-            compression_rate = (1 - size / json_size) * 100 if json_size > 0 else 0.0
+            # Recalculate with same safety bounds
+            compression_rate = 0.0
+            if json_size > 0 and size >= 0:
+                compression_rate = max(0.0, min(100.0, (1 - size / json_size) * 100))
         self.last_msg_bytes = size
         self.last_compression_rate = compression_rate
         return binary_payload, json_size, len(binary_payload), payload
 
+    # Schema validation for WebSocket messages
+    _MESSAGE_SCHEMAS = {
+        "set_mode": {"mode": (str,)},
+        "select_demo": {"name": (str,)},
+        "playback": {"action": (str,)},
+        "set_sampling": {"interval": (int, float)},
+        "set_map_override": {"map": (str, type(None))},
+        "request_demos": {},  # No required fields
+    }
+
+    def _validate_message(self, data: dict) -> Optional[str]:
+        """Validate incoming WebSocket message. Returns message type if valid, None otherwise."""
+        if not isinstance(data, dict):
+            return None
+        msg_type = data.get("type")
+        if not isinstance(msg_type, str):
+            return None
+        schema = self._MESSAGE_SCHEMAS.get(msg_type)
+        if schema is None:
+            return None  # Unknown message type
+        for field, expected_types in schema.items():
+            value = data.get(field)
+            # Allow None only if type(None) is in expected_types (e.g. set_map_override map)
+            if value is None:
+                if type(None) not in expected_types:
+                    return None  # Missing required field
+                continue
+            if not isinstance(value, expected_types):
+                return None  # Wrong type
+        return msg_type
+
     async def _client_receiver(self, websocket):
         async for raw in websocket:
+            data = None
             try:
                 if isinstance(raw, bytes):
                     raw = raw.decode("utf-8", errors="ignore")
                 data = json.loads(raw)
-            except Exception:
+            except (TypeError, ValueError, json.JSONDecodeError):
+                data = None
+            if data is None:
                 continue
-            msg_type = data.get("type")
+            # Validate message schema
+            msg_type = self._validate_message(data)
+            if not msg_type:
+                continue  # Invalid message, ignore
             if msg_type == "set_mode":
                 mode = data.get("mode")
-                self._set_mode(mode)
+                if isinstance(mode, str) and mode in {"live", "manual"}:
+                    self._set_mode(mode)
             elif msg_type == "select_demo":
                 name = data.get("name")
-                self._select_demo(name)
+                if isinstance(name, str):
+                    self._select_demo(name)
             elif msg_type == "playback":
                 self._handle_playback(data)
             elif msg_type == "set_sampling":
-                self._set_sampling_interval(data.get("interval"))
+                interval = data.get("interval")
+                if isinstance(interval, (int, float)):
+                    self._set_sampling_interval(interval)
             elif msg_type == "set_map_override":
-                self._set_map_override(data.get("map"))
+                map_name = data.get("map")
+                if map_name is None or isinstance(map_name, str):
+                    self._set_map_override(map_name)
             elif msg_type == "request_demos":
                 demo_list, _ = self._get_demo_list_snapshot()
                 try:
@@ -330,8 +461,8 @@ class ProfessionalBroadcastServer:
                             }
                         )
                     )
-                except Exception:
-                    pass
+                except Exception as exc:
+                    print(f"⚠️ Failed to send demo list to client: {exc}")
 
     def _parser_loop(self):
         print("🔄 Parser thread started (Phase 1 async)\n")
@@ -452,11 +583,29 @@ class ProfessionalBroadcastServer:
     def _resolve_demo_path(self, name: str) -> Optional[Path]:
         if not name:
             return None
-        # Explicitly block directory traversal attempts
-        if "/" in name or "\\" in name or ".." in name:
+        # Block overly long names
+        if len(name) > 255:
+            return None
+        # URL-decode to catch encoded traversal attempts
+        import urllib.parse
+
+        try:
+            decoded_name = urllib.parse.unquote(name)
+        except Exception:
+            return None
+        # Block directory traversal attempts (both raw and decoded)
+        dangerous_patterns = ["/", "\\", "..", "\x00"]
+        for pattern in dangerous_patterns:
+            if pattern in name or pattern in decoded_name:
+                return None
+        # Only allow alphanumeric, underscore, hyphen, and .dem extension
+        import re
+
+        if not re.match(r"^[\w\-]+\.dem$", decoded_name, re.IGNORECASE):
             return None
         demo_dir = self.demo_dir.resolve()
-        candidate = (self.demo_dir / name).resolve()
+        candidate = (self.demo_dir / decoded_name).resolve()
+        # Verify the resolved path is still within demo_dir
         try:
             candidate.relative_to(demo_dir)
         except Exception:
@@ -490,6 +639,14 @@ class ProfessionalBroadcastServer:
 
     def _select_demo(self, name: Optional[str]) -> None:
         if not name:
+            return
+        # Input validation for demo name
+        if not isinstance(name, str):
+            return
+        if len(name) > 255:
+            return
+        # Basic sanity check - must end with .dem
+        if not name.lower().endswith(".dem"):
             return
         self.selected_demo = name
         if self.parse_mode != "manual":
@@ -547,17 +704,17 @@ class ProfessionalBroadcastServer:
         self.msgpack_refresh_interval = value
         self._set_status(f"Sampling interval set to {value}.", level="info", sticky=False)
 
-    def _set_demo_valid(self, value: bool) -> None:
-        if self.demo_valid == value:
+    def _set_attr_and_broadcast(self, attr_name: str, value: bool) -> None:
+        if getattr(self, attr_name) == value:
             return
-        self.demo_valid = value
+        setattr(self, attr_name, value)
         self._broadcast_state_update()
 
+    def _set_demo_valid(self, value: bool) -> None:
+        self._set_attr_and_broadcast("demo_valid", value)
+
     def _set_demo_loading(self, value: bool) -> None:
-        if self.demo_loading == value:
-            return
-        self.demo_loading = value
-        self._broadcast_state_update()
+        self._set_attr_and_broadcast("demo_loading", value)
 
     def _set_map_override(self, map_name: Optional[str]) -> None:
         if not map_name or map_name == "auto":
@@ -572,10 +729,7 @@ class ProfessionalBroadcastServer:
         self._set_status(f"Map override set to {map_name}.", level="info", sticky=False)
 
     def _set_bounds_safe(self, value: bool) -> None:
-        if self.bounds_safe == value:
-            return
-        self.bounds_safe = value
-        self._broadcast_state_update()
+        self._set_attr_and_broadcast("bounds_safe", value)
 
     def _refresh_demo_list(self) -> None:
         demos = []
@@ -612,6 +766,8 @@ class ProfessionalBroadcastServer:
             self.status_version += 1
 
     def _broadcast_state_update(self) -> None:
+        if self.loop is None:
+            return
         with self.state_lock:
             if not self.clients:
                 return
@@ -631,8 +787,8 @@ class ProfessionalBroadcastServer:
         for client in clients_snapshot:
             try:
                 asyncio.run_coroutine_threadsafe(client.send(payload), self.loop)
-            except Exception:
-                continue
+            except Exception as exc:
+                print(f"⚠️ Failed to broadcast state update: {exc}")
 
     def _update_live_latency_status(self, update: dict) -> None:
         if self.parse_mode != "live":
@@ -733,12 +889,12 @@ class ProfessionalBroadcastServer:
             return
         try:
             self.worker_in.put({"cmd": "stop"})
-        except Exception:
-            pass
+        except Exception as exc:
+            print(f"⚠️ Failed to signal worker stop: {exc}")
         try:
             self.worker_process.join(timeout=2)
-        except Exception:
-            pass
+        except Exception as exc:
+            print(f"⚠️ Failed to join worker process: {exc}")
         self.worker_process = None
         self.worker_in = None
         self.worker_out = None
@@ -747,6 +903,8 @@ class ProfessionalBroadcastServer:
         try:
             self.worker_in.put({"cmd": "poll"})
             response = self.worker_out.get(timeout=2)
+            if not isinstance(response, dict):
+                return None
             return response.get("update")
         except queue.Empty:
             return None

@@ -42,3 +42,6 @@
 - `server/ws_server.py` - Concurrency (async + threads), client management, update throttling.
 - `server/demo_parser.py` - Parsing window, bounds logic, map detection, event parsing.
 - `server/events.py` - Event extraction and stateful caches.
+
+## For maintainers
+- [docs/development/CODE_INSPECTION_FINDINGS.md](development/CODE_INSPECTION_FINDINGS.md) - Code inspection and security audit findings (error/security passes and applied fixes).

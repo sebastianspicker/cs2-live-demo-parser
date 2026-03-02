@@ -43,3 +43,14 @@ endpoints, or observer machines with broad file access), they can be exploited.
 
 This notice is provided to support responsible use and to highlight the need
 for access controls around live demo files.
+
+## Context (record command)
+
+> **Small indie company corner** — How Valve "fixed" the issue two weeks after the bug was published on Reddit:
+>
+> ```
+> _record (cheat dontrecord release)
+> record (cheat dontrecord release)
+> ```
+>
+> That's not a bugfix. The bug is still there—they just hid it. Competitive matches: command disabled. Everywhere else: same command, now gated behind `sv_cheats 1`. So instead of fixing the underlying issue, they swept it under the rug and called it a day. Legitimate use cases (e.g. local live radar from `record name` during a match) get broken in the process. Very clever.

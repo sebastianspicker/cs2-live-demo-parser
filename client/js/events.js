@@ -1,3 +1,15 @@
+import { _playerKey } from "./render.js";
+
+function playerKeyFromName(client, playerName) {
+    if (!playerName) return "";
+    const players = client.currentState?.players;
+    if (Array.isArray(players)) {
+        const p = players.find((x) => x && x.name === playerName);
+        if (p) return _playerKey(p);
+    }
+    return String(playerName);
+}
+
 export function processEvents(client, events) {
     const now = Date.now();
     const ttlMap = {
@@ -31,11 +43,11 @@ export function processEvents(client, events) {
             return;
         }
         if (type === "weapon_fire") {
-            setPlayerState(client, event.player, "shoot", now + ttlMap[type]);
+            setPlayerState(client, playerKeyFromName(client, event.player), "shoot", now + ttlMap[type]);
         } else if (type === "player_hurt") {
-            setPlayerState(client, event.victim, "hurt", now + ttlMap[type]);
+            setPlayerState(client, playerKeyFromName(client, event.victim), "hurt", now + ttlMap[type]);
         } else if (type === "player_blind") {
-            setPlayerState(client, event.player, "flash", now + ttlMap[type]);
+            setPlayerState(client, playerKeyFromName(client, event.player), "flash", now + ttlMap[type]);
         } else if (type.startsWith("bomb_")) {
             setAdvisory(client, type);
         }
@@ -45,12 +57,12 @@ export function processEvents(client, events) {
     cleanupPlayerStates(client, now);
 }
 
-export function setPlayerState(client, playerName, state, expiresAt) {
-    if (!playerName) return;
-    if (!client.playerStates.has(playerName)) {
-        client.playerStates.set(playerName, {});
+export function setPlayerState(client, playerKey, state, expiresAt) {
+    if (!playerKey) return;
+    if (!client.playerStates.has(playerKey)) {
+        client.playerStates.set(playerKey, {});
     }
-    const entry = client.playerStates.get(playerName);
+    const entry = client.playerStates.get(playerKey);
     entry[state] = expiresAt;
 }
 

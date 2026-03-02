@@ -50,3 +50,6 @@ jobs:
 
       - name: Test
         run: pytest -q
+
+      - name: Security scan (bandit)
+        run: bandit -r server -x tests --severity-level low

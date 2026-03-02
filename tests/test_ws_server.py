@@ -56,6 +56,27 @@ def test_default_bind_host_is_localhost(tmp_path):
     assert server.bind_host == "127.0.0.1"
 
 
+def test_non_loopback_bind_enables_auth_by_default(tmp_path, monkeypatch):
+    monkeypatch.delenv("CS2_REQUIRE_AUTH", raising=False)
+    monkeypatch.delenv("CS2_API_KEY", raising=False)
+    monkeypatch.delenv("CS2_ALLOW_INSECURE_PUBLIC_BIND", raising=False)
+    server = ProfessionalBroadcastServer(
+        tmp_path, use_msgpack=False, poll_interval=0.1, bind_host="0.0.0.0"
+    )
+    assert server.require_auth is True
+    assert isinstance(server.api_key, str) and len(server.api_key) > 0
+
+
+def test_non_loopback_bind_can_remain_unauth_when_explicitly_allowed(tmp_path, monkeypatch):
+    monkeypatch.delenv("CS2_REQUIRE_AUTH", raising=False)
+    monkeypatch.delenv("CS2_API_KEY", raising=False)
+    monkeypatch.setenv("CS2_ALLOW_INSECURE_PUBLIC_BIND", "1")
+    server = ProfessionalBroadcastServer(
+        tmp_path, use_msgpack=False, poll_interval=0.1, bind_host="0.0.0.0"
+    )
+    assert server.require_auth is False
+
+
 def test_refresh_demo_list_skips_missing_files(tmp_path, monkeypatch):
     server = ProfessionalBroadcastServer(tmp_path, use_msgpack=False, poll_interval=0.1)
     ok_demo = tmp_path / "ok.dem"

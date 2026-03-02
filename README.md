@@ -4,19 +4,6 @@ CS2 demo parser and WebSocket broadcaster for near real-time spectator overlays 
 
 Why: Provide low-latency, read-only demo telemetry for overlays without game memory access.
 
----
-
-> **Small indie company corner** — How Valve “fixed” the issue two weeks after the bug was published on Reddit:
->
-> ```
-> _record (cheat dontrecord release)
-> record (cheat dontrecord release)
-> ```
->
-> That’s not a bugfix. The bug is still there—they just hid it. Competitive matches: command disabled. Everywhere else: same command, now gated behind `sv_cheats 1`. So instead of fixing the underlying issue, they swept it under the rug and called it a day. Legitimate use cases (e.g. local live radar from `record name` during a match) get broken in the process. Very clever.
-
----
-
 ## Features
 - Incremental demo parsing with automatic map detection
 - Two modes: Live (tail newest demo file) and Manual (pick demo + playback controls)
@@ -35,109 +22,197 @@ Some functionality is intentionally kept out of this repository and excluded
 from version control to reduce the risk of misuse as a cheat. Local-only
 features should live under `private/` (and are ignored by `.gitignore`).
 
-## Requirements
-Python 3.13 and pip.
+## How it works
 
-## Quick start
-1. Create a virtual environment (recommended):
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-python -m pip install -r requirements.txt
+```mermaid
+flowchart TB
+  subgraph UserArea[User]
+    DemosFolder["demos/"]
+  end
+  subgraph ServerArea[Server]
+    Main["main.py"]
+    ParserLoop["Parser loop"]
+    ClientHandler["Client handler"]
+    Worker["Worker (optional)"]
+    ParseError["Parse failure / bad demo"]
+    Main --> ParserLoop
+    Main --> ClientHandler
+    ParserLoop -.->|"process executor"| Worker
+    ParserLoop -->|"parse error"| ParseError
+    ParseError -->|"status warning"| ClientHandler
+    ParseError -->|"retry next tick"| ParserLoop
+  end
+  subgraph ClientArea[Browser client]
+    Browser["WebSocket client"]
+    Render["Radar + UI render"]
+    Reconnect["Reconnect with backoff"]
+    Browser --> Render
+    Browser -->|"socket error"| Reconnect
+    Reconnect -->|"retry connect"| Browser
+  end
+  DemosFolder -->|"drop .dem"| ParserLoop
+  ParserLoop -->|"build update"| Queue[(update queue)]
+  Queue --> ClientHandler
+  ClientHandler -->|"position_update"| Browser
 ```
 
-2. Start the server:
+The server runs two concurrent activities: a parser loop and an async client handler. The parser loop refreshes demos, selects the active file, polls the parser backend, and enqueues updates for broadcast. When parsing fails, the loop emits a status warning and retries on the next tick instead of stopping. The browser client applies each update to game state and reconnects with backoff on socket failures.
+
+## Lifecycle
+
+```mermaid
+sequenceDiagram
+  participant Main as main.py
+  participant ParserLoop as Parser loop
+  participant ClientHandler as Client handler
+  participant Browser as Browser client
+
+  Main->>Main: parse_args, ProfessionalBroadcastServer
+  Main->>ParserLoop: start parser thread
+  Main->>ClientHandler: websockets.serve(handle_client)
+
+  loop Parser loop
+    ParserLoop->>ParserLoop: refresh_demo_list, select_active_demo
+    ParserLoop->>ParserLoop: poll_parser (incremental or window)
+    ParserLoop->>ParserLoop: append update, broadcast to clients
+    alt Parser error
+      ParserLoop->>ClientHandler: publish status warning
+      ParserLoop->>ParserLoop: keep running and retry
+    end
+    ParserLoop->>ParserLoop: sleep(poll_interval)
+  end
+
+  Browser->>ClientHandler: WebSocket connect
+  ClientHandler->>Browser: connection (mode, demos, state)
+  ClientHandler->>Browser: last N updates from queue
+  loop Client loop
+    ClientHandler->>Browser: status / demo_list if changed
+    ClientHandler->>Browser: last_update (position_update)
+    ClientHandler->>ClientHandler: sleep(poll_interval)
+  end
+  alt Client disconnect
+    Browser->>Browser: schedule reconnect backoff
+    Browser->>ClientHandler: reconnect
+  end
+  Browser->>Browser: handleMessage, applyStateFromMessage / handlePositionUpdate
+  Browser->>Browser: updateUI, render loop
+```
+
+Startup begins in `main()`, which parses config, constructs `ProfessionalBroadcastServer`, and launches the parser thread plus WebSocket server. The parser loop runs continuously, and on parse errors it reports status and retries instead of tearing down the process. Each browser client receives a `connection` snapshot and then incremental updates (`position_update`, `status`, `demo_list`). If the socket drops, the client backs off and reconnects, then resumes normal rendering.
+
+## Requirements
+Python 3.13 and pip. Windows, macOS, or Linux.
+
+## Getting started
+
+### 1. Install
+
+**macOS / Linux:**
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+**Windows (PowerShell):**
+```powershell
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+`requirements.txt` installs demoparser2 from PyPI (no local build needed).
+
+### 2. Run the server
 
 ```bash
 python server/main.py
 ```
 
-By default, the server binds to `127.0.0.1`. For remote access, pass `--bind-host 0.0.0.0`.
+By default the server binds to `127.0.0.1`. For remote access, pass `--bind-host 0.0.0.0`.
 
-3. Drop demo files into `demos/` (the server creates it on first run).
+Optional: `--metrics-port 8766` for a JSON metrics endpoint at `http://127.0.0.1:8766/metrics` and a simple health check at `http://127.0.0.1:8766/health`.
 
-4. Open the client:
-- `client/index.html` (defaults to `ws://localhost:8765`)
-- Use the Mode selector to choose Live or Manual.
-- Manual mode requires selecting a demo before playback controls unlock.
-- Map Override is optional. Use Auto to keep detected maps.
+### 3. Add demo files
 
-## Development (lint + tests)
-Install dev tools and run the offline test suite:
+Place `.dem` files in `demos/` (the server creates the folder on first run). The map is detected from the filename or demo header.
 
-```bash
-python -m pip install -r requirements.txt -r requirements-dev.txt
-ruff check .
-ruff format .
-pytest -q
-```
+Examples: `demo_mirage.dem`, `match_dust2.dem`, `scrim_nuke.dem`.
 
-## Validation (build / run / test)
-From repo root:
+Live mode follows the newest file in this folder. Manual mode lets you select a demo and use playback controls.
 
-- **Install:** `python -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt -r requirements-dev.txt`
-- **Run:** `python server/main.py` (then open `client/index.html`)
-- **Test:** `ruff format --check . && ruff check . && pytest -q`
-- **Full local CI:** `./scripts/ci-local.sh` (optional: `RUN_PIP_AUDIT=1` or `RUN_GITLEAKS=1`)
+### 4. Open the client
 
-See `ARCHIVE.md` for the full list of validation commands and archive rationale.
+Open `client/index.html` in your browser. The client defaults to `ws://localhost:8765` and can be overridden with `?ws=ws://host:8765`.
 
-## Security
-- Default bind host is `127.0.0.1`. To expose externally, set `--bind-host 0.0.0.0` (or `bind_host` in `config.json`) and consider network-level protections.
-- CI includes secret scanning (gitleaks), SAST (CodeQL), and dependency scanning (pip-audit).
+Example: `file:///.../client/index.html?ws=ws://127.0.0.1:8765`
+
+### 5. First steps in the UI
+
+1. Choose a Mode: **Live** (auto-selects newest demo) or **Manual** (pick a demo, then play/pause/seek/speed).
+2. Optional: set a Map Override if detection is wrong.
+3. Optional: adjust the MsgPack sampling interval (controls how often size stats refresh).
+4. Watch the demo status and bounds safety badges for parsing readiness.
 
 ## Configuration
-- `config.json` (root): server/client/parser settings
-- Optional local files (gitignored; see below):
-  - `maps/map_definitions.json`: map metadata for UI defaults
-  - `maps/world_bounds.json`: world-to-radar bounds
+
+- **config.json** (root): server/client/parser settings.
+- Optional local files (gitignored): `maps/map_definitions.json`, `maps/world_bounds.json`, `maps/overviews/` (see license for third-party assets).
 
 Key server settings (config or env):
 - `server.poll_interval` / `CS2_POLL_INTERVAL` (seconds)
 - `server.min_poll_interval` / `CS2_MIN_POLL_INTERVAL` (auto-tuning floor)
 - `server.msgpack_refresh_interval` / `CS2_MSGPACK_REFRESH_INTERVAL` (metrics sampling)
-- `server.bind_host` / `CS2_BIND_HOST` (bind address; default `127.0.0.1`)
-- `server.metrics_host` / `CS2_METRICS_HOST` (metrics bind address; default `127.0.0.1`)
+- `server.bind_host` / `CS2_BIND_HOST` (default `127.0.0.1`)
+- `server.metrics_host` / `CS2_METRICS_HOST` (metrics bind address)
 
-UI controls:
-- Map override (Auto or specific map)
-- Sampling interval for MsgPack compression stats
-- Playback controls (play/pause/seek/speed) in Manual mode
+Common flags: `--demo-dir <path>`, `--poll-interval <sec>`, `--no-msgpack`, `--parser-executor none|thread|process`, `--metrics-port <port>`.
+
+## Development (lint + tests)
+
+```bash
+pip install -r requirements.txt -r requirements-dev.txt
+ruff check .
+ruff format .
+pytest -q
+```
+
+From repo root: **Install** `python -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt -r requirements-dev.txt` · **Run** `python server/main.py` · **Test** `ruff format --check . && ruff check . && pytest -q` · **Full local CI** `./scripts/ci-local.sh` (optional: `RUN_PIP_AUDIT=1` or `RUN_GITLEAKS=1`).
+
+See [MAINTENANCE.md](MAINTENANCE.md) for validation commands.
+
+## Security
+- Default bind host is `127.0.0.1`. To expose externally, set `--bind-host 0.0.0.0` (or `bind_host` in `config.json`) and consider network-level protections.
+- CI includes secret scanning (gitleaks), SAST (CodeQL), and dependency scanning (pip-audit).
 
 ## Documentation
-- `docs/QUICK_START.md`
-- `docs/INSTALLATION.md`
-- `docs/PARSER_DOCUMENTATION.md`
-- `docs/SECURITY_AND_ANTICHEAT_FAQ.md`
-- `docs/VALVE_NOTICE.md` (incremental demo reading risks and latency)
-- `docs/RUNBOOK.md` (setup, run, lint, test, troubleshooting)
-- `docs/issue-audit/` (read-only code audit template; see `docs/issue-audit/README.md`)
-- `ARCHIVE.md` (archive notice, keep/remove/move list, validation commands)
-- `SECURITY.md` (security reporting guidance)
-- `CONTRIBUTING.md` (development + contribution notes)
+- `docs/PARSER_DOCUMENTATION.md` — Parser behavior and usage
+- `docs/SECURITY_AND_ANTICHEAT_FAQ.md` — Security and anticheat FAQ
+- `docs/VALVE_NOTICE.md` — Incremental demo reading risks and latency
+- `docs/RUNBOOK.md` — Lint, test, CI, troubleshooting
+- `docs/REPO_MAP.md` — Repository layout and entry points
+- [MAINTENANCE.md](MAINTENANCE.md) — Maintenance and validation commands
+- `SECURITY.md` — Security reporting guidance
+- `CONTRIBUTING.md` — Development and contribution notes
 
 ## Repository layout
 ```
 .
 ├── client/                 Browser client
 ├── server/                 Python WebSocket server
-├── demos/                  Demo files (.dem)
-├── docs/                   Public documentation
+├── demos/                  Demo files directory (.gitkeep; .dem files gitignored)
+├── docs/                   Documentation
 ├── scripts/                CI local reproduction (ci-local.sh)
 └── tests/                  Pytest suite
 ```
 
 ## Optional local data (gitignored)
-- `maps/` (local-only, excluded for licensing). You may provide:
-  - `maps/map_definitions.json`
-  - `maps/world_bounds.json`
-  - `maps/overviews/` – optional overview images and metadata, e.g. `de_*/meta.json5` (see docs; some assets may have separate licenses)
+- `maps/` — You may provide `map_definitions.json`, `world_bounds.json`, `overviews/` (see docs; some assets may have separate licenses).
 
 ## License
 MIT. See `LICENSE`.
 
 ## Troubleshooting
-- If no demos are detected, place `.dem` files in `demos/` or pass `--demo-dir`.
-- If the client cannot connect, ensure the server is running and the WebSocket URL matches host/port.
-- If tests fail to import server modules, run from repo root so `tests/conftest.py` can set `sys.path`.
+- No demos detected: place `.dem` files in `demos/` or pass `--demo-dir`.
+- Client cannot connect: ensure the server is running and the WebSocket URL matches host/port.
+- Tests fail to import server modules: run from repo root so `tests/conftest.py` can set `sys.path`.

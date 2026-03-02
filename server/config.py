@@ -1,4 +1,5 @@
 import json
+import ipaddress
 import os
 import re
 from pathlib import Path
@@ -125,6 +126,23 @@ def _default_path(env_key: str, relative_path: str) -> Path:
     return _repo_root() / relative_path
 
 
+def is_loopback_host(host: str) -> bool:
+    """Return True when host resolves to loopback/localhost."""
+    if not isinstance(host, str):
+        return False
+    normalized = host.strip().lower()
+    if not normalized:
+        return False
+    if normalized in {"localhost", "ip6-localhost"}:
+        return True
+    # Accept bracketed IPv6 notation, e.g. [::1]
+    normalized = normalized.strip("[]")
+    try:
+        return ipaddress.ip_address(normalized).is_loopback
+    except ValueError:
+        return False
+
+
 def _load_env_cast(key: str, cast: Callable[[str], _T], default: _T) -> _T:
     value = os.getenv(key)
     if value is None:
@@ -234,20 +252,30 @@ def load_overview_meta(base_dir: Path) -> dict:
     if not base_dir.exists():
         return bounds
     for meta_path in base_dir.glob("de_*/meta.json5"):
+        data = None
         try:
             raw = meta_path.read_text(encoding="utf-8", errors="ignore")
             data = json.loads(_strip_json5(raw))
-        except Exception:
+        except (OSError, TypeError, ValueError, json.JSONDecodeError):
+            data = None
+        if not isinstance(data, dict):
             continue
         resolution = data.get("resolution")
-        offset = data.get("offset", {})
-        if resolution is None or "x" not in offset or "y" not in offset:
+        offset = data.get("offset")
+        if not isinstance(offset, dict) or resolution is None or "x" not in offset or "y" not in offset:
             continue
+        resolution_value = None
+        offset_x = None
+        offset_y = None
         try:
             resolution_value = float(resolution)
             offset_x = float(offset["x"])
             offset_y = float(offset["y"])
-        except Exception:
+        except (TypeError, ValueError):
+            resolution_value = None
+            offset_x = None
+            offset_y = None
+        if resolution_value is None or offset_x is None or offset_y is None:
             continue
         radar_size = 1024.0
         min_x = -offset_x
@@ -263,10 +291,16 @@ def load_overview_meta(base_dir: Path) -> dict:
         }
         z_range = data.get("zRange") if isinstance(data, dict) else None
         if isinstance(z_range, dict) and "min" in z_range and "max" in z_range:
+            z_min = None
+            z_max = None
             try:
-                entry["z_range"] = {"min": float(z_range["min"]), "max": float(z_range["max"])}
-            except Exception:
-                pass
+                z_min = float(z_range["min"])
+                z_max = float(z_range["max"])
+            except (TypeError, ValueError):
+                z_min = None
+                z_max = None
+            if z_min is not None and z_max is not None:
+                entry["z_range"] = {"min": z_min, "max": z_max}
         bounds[map_key] = entry
     return bounds
 
