@@ -168,6 +168,17 @@ Key server settings (config or env):
 
 Common flags: `--demo-dir <path>`, `--poll-interval <sec>`, `--no-msgpack`, `--parser-executor none|thread|process`, `--metrics-port <port>`.
 
+## Alternatives & Successors
+
+> This project is archived. Consider these actively maintained alternatives:
+
+| Project | Description | Link |
+|---------|-------------|------|
+| Leetify | AI-powered CS2 match analysis | [leetify.com](https://leetify.com) |
+| SCOPE.GG | Live CS2 analysis and coaching | [scope.gg](https://scope.gg) |
+| CS2 Demo Manager | Desktop demo analysis tool | [GitHub](https://github.com/akiver/cs-demo-manager) |
+| HLTV.org | Professional match stats and live scores | [hltv.org](https://hltv.org) |
+
 ## Development (lint + tests)
 
 ```bash

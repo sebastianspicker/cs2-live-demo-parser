@@ -262,7 +262,12 @@ def load_overview_meta(base_dir: Path) -> dict:
             continue
         resolution = data.get("resolution")
         offset = data.get("offset")
-        if not isinstance(offset, dict) or resolution is None or "x" not in offset or "y" not in offset:
+        if (
+            not isinstance(offset, dict)
+            or resolution is None
+            or "x" not in offset
+            or "y" not in offset
+        ):
             continue
         resolution_value = None
         offset_x = None
